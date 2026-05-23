@@ -87,6 +87,13 @@
 #### 11.5 Release Workflow Comments
 #### 11.6 Verification
 
+### 12. Npm Publish Workflow
+#### 12.1 Required npm Setup
+#### 12.2 Native Artifact Requirement
+#### 12.3 Manual Workflow Inputs
+#### 12.4 Publish Order
+#### 12.5 Dry Run
+
 ## 1. Fork Purpose
 
 ### 1.1 Why This Fork Exists
@@ -1274,4 +1281,135 @@ The staged launcher was also executed without optional native payloads to verify
 
 ```text
 Missing optional dependency happycodex-darwin-arm64. Reinstall HappyCodex: npm install -g happycodex@latest
+```
+
+## 12. Npm Publish Workflow
+
+### 12.1 Required npm Setup
+
+The fork includes a manual GitHub Actions workflow:
+
+```text
+.github/workflows/happycodex-npm-publish.yml
+```
+
+Before running it for a real publish, configure the GitHub repository secret:
+
+```text
+NPM_TOKEN
+```
+
+The token must belong to an npm account that can publish the unscoped package name `happycodex`.
+
+The workflow uses `actions/setup-node` against:
+
+```text
+https://registry.npmjs.org
+```
+
+and passes the token through:
+
+```text
+NODE_AUTH_TOKEN
+```
+
+The workflow also has `id-token: write` permission so `npm publish --provenance` can attach provenance when enabled.
+
+### 12.2 Native Artifact Requirement
+
+The npm package is not a pure JavaScript package. The root wrapper depends on platform-specific optional package versions, and those platform packages contain native Codex binaries.
+
+Before publishing npm packages, a `rust-release` workflow run must exist for the same version. That run must have produced the native artifacts named by target triple, for example:
+
+```text
+aarch64-apple-darwin
+x86_64-apple-darwin
+x86_64-unknown-linux-musl
+aarch64-unknown-linux-musl
+x86_64-pc-windows-msvc
+aarch64-pc-windows-msvc
+```
+
+The publish workflow stages npm tarballs by downloading those artifacts through `scripts/stage_npm_packages.py`.
+
+The staging script now reads the native artifact repository from:
+
+```text
+CODEX_RELEASE_ARTIFACT_REPO
+```
+
+The HappyCodex publish workflow sets that to:
+
+```text
+${{ github.repository }}
+```
+
+so it downloads artifacts from `happyskillsai/happycodex`, not `openai/codex`.
+
+### 12.3 Manual Workflow Inputs
+
+The workflow is `workflow_dispatch` only.
+
+Inputs:
+
+- `version`: version to publish, without `rust-v`, for example `0.6.0`.
+- `workflow_url`: optional URL of the `rust-release` workflow run that produced native artifacts.
+- `npm_tag`: root package dist-tag, normally `latest` for stable and `alpha` for prerelease.
+- `dry_run`: defaults to `true`; keep this enabled for the first run.
+- `provenance`: defaults to `true`; attached only on real publishes, not dry runs.
+
+If `workflow_url` is omitted, `scripts/stage_npm_packages.py` tries to find a matching release workflow run for branch/tag:
+
+```text
+rust-vVERSION
+```
+
+Providing `workflow_url` is safer for the first few releases because it removes ambiguity about which native artifact run is used.
+
+### 12.4 Publish Order
+
+The workflow publishes platform package versions first:
+
+```text
+happycodex@VERSION-linux-x64
+happycodex@VERSION-linux-arm64
+happycodex@VERSION-darwin-x64
+happycodex@VERSION-darwin-arm64
+happycodex@VERSION-win32-x64
+happycodex@VERSION-win32-arm64
+```
+
+Then it publishes the root wrapper:
+
+```text
+happycodex@VERSION
+```
+
+This order is required. The root wrapper's optional dependencies point at the platform versions. If the root publishes first, users can install a wrapper whose platform payload does not exist yet.
+
+Platform package dist-tags are derived from the root `npm_tag`:
+
+- root `latest` -> platform tags `linux-x64`, `darwin-arm64`, etc.
+- root `alpha` -> platform tags `alpha-linux-x64`, `alpha-darwin-arm64`, etc.
+
+### 12.5 Dry Run
+
+Run the workflow once with:
+
+```text
+dry_run: true
+```
+
+The dry run still:
+
+- stages all HappyCodex npm tarballs,
+- verifies every tarball has package name `happycodex`,
+- verifies the root package exposes `bin.happycodex`,
+- verifies root optional dependency aliases point to `npm:happycodex@...`,
+- runs `npm publish --dry-run` in the same platform-first order.
+
+For a real release, rerun the same workflow with:
+
+```text
+dry_run: false
 ```
