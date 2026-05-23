@@ -5,7 +5,7 @@
 ### 1. Fork Purpose
 #### 1.1 Why This Fork Exists
 #### 1.2 What This Fork Changes
-#### 1.3 What This Fork Does Not Change Yet
+#### 1.3 Npm Package and Binary Name
 
 ### 2. Repository Setup
 #### 2.1 Remotes
@@ -79,6 +79,14 @@
 #### 10.2 Tests Updated
 #### 10.3 Tests Not Run During Fork Setup
 
+### 11. Npm Packaging Changes
+#### 11.1 codex-cli/package.json
+#### 11.2 codex-cli/bin/codex.js
+#### 11.3 codex-cli/scripts/build_npm_package.py
+#### 11.4 README.md
+#### 11.5 Release Workflow Comments
+#### 11.6 Verification
+
 ## 1. Fork Purpose
 
 ### 1.1 Why This Fork Exists
@@ -106,21 +114,32 @@ Submitting a skill slash command creates a user message that contains:
 
 The existing skill mention conversion pipeline then turns the binding into a `UserInput::Skill`, so the model receives the same explicit skill invocation shape used by normal `$skill` mentions.
 
-### 1.3 What This Fork Does Not Change Yet
+### 1.3 Npm Package and Binary Name
 
-This commit does not rename the npm package from Codex to HappyCodex yet.
+The fork now renames the npm-facing CLI wrapper from upstream Codex to HappyCodex.
 
-It does not modify:
+The global install command is:
 
-- `codex-cli/package.json`,
-- `codex-cli/bin/codex.js`,
-- npm optional dependency names,
-- release workflows,
-- installer scripts,
-- GitHub Actions for upstream sync,
-- README branding.
+```bash
+npm install -g happycodex
+```
 
-Those are the next packaging and distribution steps. This document only describes the committed feature patch plus the current fork operating model.
+The installed command is:
+
+```bash
+happycodex
+```
+
+The JavaScript launcher file remains `codex-cli/bin/codex.js` because upstream packaging already uses that path and keeping it reduces merge churn. The npm `bin` map exposes it as `happycodex`, so users do not run `codex` when installing the fork from npm.
+
+The bundled native executable is still named `codex` inside the platform archives. The npm launcher resolves that internal binary and forwards all CLI arguments to it. This is deliberate for now because renaming the Rust binary and release artifacts would be a larger change touching Cargo targets, release assets, standalone installers, and update checks.
+
+This fork has not yet added:
+
+- automated upstream sync workflows,
+- HappyCodex-specific standalone installers,
+- Homebrew cask packaging,
+- full release workflow cleanup for every non-npm artifact.
 
 ## 2. Repository Setup
 
@@ -1031,7 +1050,7 @@ Known limitations in the current patch:
 
 - Skill names that collide with built-in slash commands resolve to the built-in command.
 - Remote plugin catalog skills do not expose `argument_hint`; they currently use `None`.
-- The npm package and CLI binary are still named as upstream Codex.
+- The npm package and global command are `happycodex`, but the internal native binary and many non-npm release artifacts are still named `codex`.
 - No upstream sync workflow has been added yet.
 - No publish workflow for `happycodex` has been added yet.
 
@@ -1039,14 +1058,12 @@ Known limitations in the current patch:
 
 Recommended next steps:
 
-1. Rename npm package metadata to `happycodex`.
-2. Rename optional platform packages.
-3. Update `codex-cli/bin/codex.js` package lookup names and reinstall messages.
-4. Update release staging scripts to publish HappyCodex package names.
-5. Add a GitHub Actions upstream sync workflow.
-6. Add a manual publish workflow.
-7. Add a fork changelog section for each downstream patch.
-8. Add integration tests for slash-invoked skills producing `UserInput::Skill`.
+1. Rename non-npm release artifacts only if the fork needs standalone installers.
+2. Decide whether to rename the Rust native binary from `codex` to `happycodex`.
+3. Add a GitHub Actions upstream sync workflow.
+4. Add a manual publish workflow for npm package publication.
+5. Add a fork changelog section for each downstream patch.
+6. Add integration tests for slash-invoked skills producing `UserInput::Skill`.
 
 ## 10. Validation Notes
 
@@ -1095,3 +1112,166 @@ cargo check --workspace
 ```
 
 The exact package names may need adjustment if upstream renames workspace packages.
+
+## 11. Npm Packaging Changes
+
+### 11.1 codex-cli/package.json
+
+Change:
+
+- Renamed the npm package from `@openai/codex` to `happycodex`.
+- Changed the global binary map from `codex` to `happycodex`.
+- Updated the package description to describe HappyCodex as a downstream fork with HappySkills enhancements.
+- Updated the repository URL to `git+https://github.com/happyskillsai/happycodex.git`.
+
+Reason:
+
+- `npm install -g happycodex` must install a global command named `happycodex`.
+- The package should not present itself as the official `@openai/codex` npm package.
+
+Important detail:
+
+```json
+"bin": {
+  "happycodex": "bin/codex.js"
+}
+```
+
+The JavaScript file path remains `bin/codex.js` to minimize divergence from upstream. The installed command name comes from the `bin` key, not from the JavaScript filename.
+
+### 11.2 codex-cli/bin/codex.js
+
+Change:
+
+- Replaced platform optional dependency aliases:
+  - `@openai/codex-linux-x64` -> `happycodex-linux-x64`
+  - `@openai/codex-linux-arm64` -> `happycodex-linux-arm64`
+  - `@openai/codex-darwin-x64` -> `happycodex-darwin-x64`
+  - `@openai/codex-darwin-arm64` -> `happycodex-darwin-arm64`
+  - `@openai/codex-win32-x64` -> `happycodex-win32-x64`
+  - `@openai/codex-win32-arm64` -> `happycodex-win32-arm64`
+- Updated missing dependency reinstall messages to use:
+
+```bash
+npm install -g happycodex@latest
+```
+
+and:
+
+```bash
+bun install -g happycodex@latest
+```
+
+Reason:
+
+- The root `happycodex` package installs platform-specific optional dependency aliases.
+- If a platform package is missing, the recovery instruction must point users back to HappyCodex, not upstream Codex.
+
+Important detail:
+
+- The launcher still looks for a native executable named `codex` inside each platform package.
+- This is currently intentional because the native Rust binary and upstream release artifacts are still named `codex`.
+
+### 11.3 codex-cli/scripts/build_npm_package.py
+
+Change:
+
+- Changed `CODEX_NPM_NAME` from `@openai/codex` to `happycodex`.
+- Changed all `CODEX_PLATFORM_PACKAGES[*].npm_name` aliases to `happycodex-*`.
+- Updated comments and script docstring to describe the HappyCodex npm module.
+
+Reason:
+
+- The staging script writes the package metadata used for release tarballs.
+- The generated root package must depend on HappyCodex platform aliases:
+
+```json
+"optionalDependencies": {
+  "happycodex-darwin-arm64": "npm:happycodex@<version>-darwin-arm64"
+}
+```
+
+Important detail:
+
+- The script still uses internal package keys such as `codex`, `codex-linux-x64`, and tarball names such as `codex-npm-darwin-arm64-<version>.tgz`.
+- Those names are internal staging identifiers and release filenames. The package metadata inside the tarballs is now `happycodex`.
+- Renaming those internal keys is possible later, but it would touch more release code and is not required for `npm install -g happycodex`.
+
+### 11.4 README.md
+
+Change:
+
+- Updated the install command to:
+
+```bash
+npm install -g happycodex
+```
+
+- Updated the first-run command to:
+
+```bash
+happycodex
+```
+
+- Removed the upstream Homebrew install block from the quickstart.
+- Removed the upstream GitHub Release binary download instructions from the quickstart.
+- Updated the desktop app example to `happycodex app`.
+
+Reason:
+
+- The fork currently supports the npm wrapper path.
+- Homebrew and standalone GitHub Release artifacts are not yet fork-branded and should not be presented as HappyCodex installation methods.
+
+### 11.5 Release Workflow Comments
+
+Change:
+
+- Updated comments in `.github/workflows/rust-release.yml` from `@openai/codex@latest` to `happycodex@latest`.
+
+Reason:
+
+- The publish order comment describes why platform packages must publish before the root wrapper.
+- The logic still applies, but the package name should match the fork.
+
+### 11.6 Verification
+
+Local staging command used:
+
+```bash
+python3.11 codex-cli/scripts/build_npm_package.py --package codex --version 1.2.3 --staging-dir /private/tmp/happycodex-npm-stage
+```
+
+The generated staged package has:
+
+```json
+{
+  "name": "happycodex",
+  "version": "1.2.3",
+  "bin": {
+    "happycodex": "bin/codex.js"
+  }
+}
+```
+
+Its optional dependency aliases are:
+
+```text
+happycodex-linux-x64
+happycodex-linux-arm64
+happycodex-darwin-x64
+happycodex-darwin-arm64
+happycodex-win32-x64
+happycodex-win32-arm64
+```
+
+`npm pack` produced:
+
+```text
+happycodex-1.2.3.tgz
+```
+
+The staged launcher was also executed without optional native payloads to verify the missing dependency message. It correctly reported:
+
+```text
+Missing optional dependency happycodex-darwin-arm64. Reinstall HappyCodex: npm install -g happycodex@latest
+```
