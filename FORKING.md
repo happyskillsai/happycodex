@@ -88,11 +88,14 @@
 #### 11.6 Verification
 
 ### 12. Npm Publish Workflow
-#### 12.1 Required npm Setup
-#### 12.2 Native Artifact Requirement
-#### 12.3 Manual Workflow Inputs
-#### 12.4 Publish Order
-#### 12.5 Dry Run
+#### 12.1 Recommended Release Workflow
+#### 12.2 Required npm Setup
+#### 12.3 Versioning Policy
+#### 12.4 Native Artifact Build
+#### 12.5 Manual Workflow Inputs
+#### 12.6 Publish Order
+#### 12.7 Dry Run
+#### 12.8 Publish-Only Escape Hatch
 
 ### 13. GitHub Actions Cleanup
 #### 13.1 Why Upstream CI Was Noisy
@@ -1291,15 +1294,29 @@ Missing optional dependency happycodex-darwin-arm64. Reinstall HappyCodex: npm i
 
 ## 12. Npm Publish Workflow
 
-### 12.1 Required npm Setup
+### 12.1 Recommended Release Workflow
 
-The fork includes a manual GitHub Actions workflow:
+The recommended HappyCodex release path is:
 
 ```text
-.github/workflows/happycodex-npm-publish.yml
+.github/workflows/happycodex-release.yml
 ```
 
-Before running it for a real publish, configure the GitHub repository secret:
+This workflow is `workflow_dispatch` only. It does the complete npm release sequence:
+
+1. Validate the release version and npm dist-tag.
+2. Build the six native platform package archives from this fork.
+3. Upload the native archives as GitHub Actions artifacts.
+4. Stage the root and platform npm tarballs from those artifacts.
+5. Verify the staged package metadata.
+6. Publish platform package versions first.
+7. Publish the root `happycodex` package last.
+
+This is now the easiest and safest workflow for ordinary HappyCodex npm releases because the build artifacts and npm package are produced by the same GitHub Actions run.
+
+### 12.2 Required npm Setup
+
+Before running a real publish, configure the GitHub repository secret:
 
 ```text
 NPM_TOKEN
@@ -1307,72 +1324,110 @@ NPM_TOKEN
 
 The token must belong to an npm account that can publish the unscoped package name `happycodex`.
 
-The workflow uses `actions/setup-node` against:
+Both npm workflows use `actions/setup-node` against:
 
 ```text
 https://registry.npmjs.org
 ```
 
-and passes the token through:
+and pass the token through:
 
 ```text
 NODE_AUTH_TOKEN
 ```
 
-The workflow also has `id-token: write` permission so `npm publish --provenance` can attach provenance when enabled.
+The workflows also have `id-token: write` permission so `npm publish --provenance` can attach provenance when enabled.
 
-### 12.2 Native Artifact Requirement
+### 12.3 Versioning Policy
 
-The npm package is not a pure JavaScript package. The root wrapper depends on platform-specific optional package versions, and those platform packages contain native Codex binaries.
+HappyCodex is a separate npm package from upstream Codex, so it can use the same numeric version as upstream without colliding with `@openai/codex`.
 
-Before publishing npm packages, a `rust-release` workflow run must exist for the same version. That run must have produced the native artifacts named by target triple, for example:
+Recommended policy:
+
+- If the fork is built from upstream Codex `X.Y.Z` with only the standard HappyCodex patch, publish `happycodex@X.Y.Z`.
+- If the fork needs an extra downstream-only fix before the next upstream version, publish `happycodex@X.Y.Z-happy.1`, then `X.Y.Z-happy.2`, and so on.
+- Use `npm_tag=latest` only for stable versions like `X.Y.Z`.
+- Use a non-latest tag such as `happy`, `alpha`, or `beta` for prerelease versions like `X.Y.Z-happy.1`.
+
+The release workflow accepts SemVer versions without build metadata:
 
 ```text
-aarch64-apple-darwin
-x86_64-apple-darwin
+0.6.0
+0.6.0-alpha.1
+0.6.0-happy.1
+```
+
+Before building native artifacts, the workflow runs:
+
+```text
+scripts/set_happycodex_release_version.py VERSION
+```
+
+That updates:
+
+- `codex-rs/Cargo.toml` `[workspace.package].version`, so the native binary reports the release version.
+- `codex-cli/package.json`, so source package metadata matches the intended release version.
+
+The npm staging script still writes the final version into every staged package before packing.
+
+### 12.4 Native Artifact Build
+
+The root npm package is only a JavaScript launcher. It depends on platform-specific optional package versions that contain native Codex binaries.
+
+The recommended `happycodex-release.yml` workflow builds these native targets on standard GitHub-hosted runners:
+
+```text
 x86_64-unknown-linux-musl
 aarch64-unknown-linux-musl
+x86_64-apple-darwin
+aarch64-apple-darwin
 x86_64-pc-windows-msvc
 aarch64-pc-windows-msvc
 ```
 
-The publish workflow stages npm tarballs by downloading those artifacts through `scripts/stage_npm_packages.py`.
-
-The staging script now reads the native artifact repository from:
+Each build uploads a GitHub Actions artifact named by target triple. Each artifact contains:
 
 ```text
-CODEX_RELEASE_ARTIFACT_REPO
+codex-package-<target>.tar.gz
 ```
 
-The HappyCodex publish workflow sets that to:
+The npm staging script downloads those artifacts through:
 
 ```text
-${{ github.repository }}
+scripts/stage_npm_packages.py
+```
+
+The workflow sets:
+
+```text
+CODEX_RELEASE_ARTIFACT_REPO=${{ github.repository }}
 ```
 
 so it downloads artifacts from `happyskillsai/happycodex`, not `openai/codex`.
 
-### 12.3 Manual Workflow Inputs
+The workflow uses standard hosted runner labels that avoid OpenAI's private `codex-runners` group:
 
-The workflow is `workflow_dispatch` only.
+```text
+ubuntu-24.04
+ubuntu-24.04-arm
+macos-15-intel
+macos-15
+windows-latest
+windows-11-arm
+```
+
+### 12.5 Manual Workflow Inputs
+
+The recommended workflow is `workflow_dispatch` only.
 
 Inputs:
 
-- `version`: version to publish, without `rust-v`, for example `0.6.0`.
-- `workflow_url`: optional URL of the `rust-release` workflow run that produced native artifacts.
-- `npm_tag`: root package dist-tag, normally `latest` for stable and `alpha` for prerelease.
+- `version`: version to build and publish, for example `0.6.0` or `0.6.0-happy.1`.
+- `npm_tag`: root package dist-tag, normally `latest` for stable and `happy`, `alpha`, or `beta` for prerelease.
 - `dry_run`: defaults to `true`; keep this enabled for the first run.
 - `provenance`: defaults to `true`; attached only on real publishes, not dry runs.
 
-If `workflow_url` is omitted, `scripts/stage_npm_packages.py` tries to find a matching release workflow run for branch/tag:
-
-```text
-rust-vVERSION
-```
-
-Providing `workflow_url` is safer for the first few releases because it removes ambiguity about which native artifact run is used.
-
-### 12.4 Publish Order
+### 12.6 Publish Order
 
 The workflow publishes platform package versions first:
 
@@ -1396,9 +1451,53 @@ This order is required. The root wrapper's optional dependencies point at the pl
 Platform package dist-tags are derived from the root `npm_tag`:
 
 - root `latest` -> platform tags `linux-x64`, `darwin-arm64`, etc.
+- root `happy` -> platform tags `happy-linux-x64`, `happy-darwin-arm64`, etc.
 - root `alpha` -> platform tags `alpha-linux-x64`, `alpha-darwin-arm64`, etc.
 
-### 12.5 Dry Run
+### 12.7 Dry Run
+
+Run the workflow once with:
+
+```text
+dry_run: true
+```
+
+The dry run still:
+
+- builds all six native artifacts,
+- stages all HappyCodex npm tarballs,
+- verifies every tarball has package name `happycodex`,
+- verifies the root package exposes `bin.happycodex`,
+- verifies root optional dependency aliases point to `npm:happycodex@...`,
+- runs `npm publish --dry-run` in the same platform-first order.
+
+For a real release, rerun the same workflow with:
+
+```text
+dry_run: false
+```
+
+### 12.8 Publish-Only Escape Hatch
+
+The fork also keeps a lower-level publish-only workflow:
+
+```text
+.github/workflows/happycodex-npm-publish.yml
+```
+
+Use this only when native artifacts already exist in a previous workflow run and you want to stage/publish npm from that existing run.
+
+Its inputs are similar, with one extra optional input:
+
+- `workflow_url`: URL of the workflow run that produced native artifacts.
+
+If `workflow_url` is omitted, `scripts/stage_npm_packages.py` tries to find a matching release workflow run for branch/tag:
+
+```text
+rust-vVERSION
+```
+
+For HappyCodex, passing `workflow_url` explicitly is safer because the fork's recommended release path does not require a `rust-vVERSION` tag.
 
 Run the workflow once with:
 
@@ -1501,7 +1600,7 @@ HappyCodex should use this workflow policy:
 - Pushes and pull requests run lightweight checks only.
 - Heavy inherited upstream workflows are manual-only diagnostics.
 - Native release artifacts are produced only by explicit release workflows or release tags.
-- npm publication is handled only by `.github/workflows/happycodex-npm-publish.yml`.
+- npm publication is handled only by HappyCodex-owned manual workflows: `.github/workflows/happycodex-release.yml` for normal releases and `.github/workflows/happycodex-npm-publish.yml` when reusing existing artifacts.
 - Automatic upstream-sync work should open a sync branch or pull request, not publish directly.
 
 This keeps GitHub Actions cost low, prevents inherited upstream infrastructure failures from spamming email, and preserves the option to run deeper checks when a merge from upstream touches areas like Bazel, V8, SDK packaging, or native release artifacts.

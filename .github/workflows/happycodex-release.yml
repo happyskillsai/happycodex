@@ -1,0 +1,360 @@
+name: happycodex-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "HappyCodex version to build and publish, for example 0.6.0 or 0.6.0-happy.1."
+        required: true
+        type: string
+      npm_tag:
+        description: "Root npm dist-tag. Use latest for stable releases and alpha/beta/happy for prereleases."
+        required: true
+        default: latest
+        type: string
+      dry_run:
+        description: "Run npm publish with --dry-run. Keep true until the release candidate is verified."
+        required: true
+        default: true
+        type: boolean
+      provenance:
+        description: "Attach npm provenance on real publishes."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: happycodex-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release inputs
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - name: Validate SemVer and npm tag
+        id: validate
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          NPM_TAG: ${{ inputs.npm_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "version must be SemVer without build metadata, for example 0.6.0, 0.6.0-alpha.1, or 0.6.0-happy.1"
+            exit 1
+          fi
+
+          if [[ -z "${NPM_TAG}" || "${NPM_TAG}" =~ [[:space:]] ]]; then
+            echo "npm_tag must be a non-empty npm dist-tag without whitespace"
+            exit 1
+          fi
+
+          if [[ "${NPM_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "npm_tag must not look like a version"
+            exit 1
+          fi
+
+          if [[ "${DRY_RUN}" != "true" && -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "NPM_TOKEN secret is required when dry_run is false."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  build-native-artifacts:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            os_family: linux
+            cargo_bins: "codex bwrap"
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            os_family: linux
+            cargo_bins: "codex bwrap"
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            os_family: macos
+            cargo_bins: "codex"
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            os_family: macos
+            cargo_bins: "codex"
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_family: windows
+            cargo_bins: "codex codex-command-runner codex-windows-sandbox-setup"
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            os_family: windows
+            cargo_bins: "codex codex-command-runner codex-windows-sandbox-setup"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set release version in sources
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          if command -v python3 >/dev/null 2>&1; then
+            python_bin=python3
+          else
+            python_bin=python
+          fi
+          "$python_bin" scripts/set_happycodex_release_version.py "${VERSION}"
+
+      - name: Install Linux build dependencies
+        if: ${{ matrix.os_family == 'linux' }}
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zstd pkg-config libcap-dev
+
+      - name: Install macOS build dependencies
+        if: ${{ matrix.os_family == 'macos' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v zstd >/dev/null 2>&1; then
+            brew install zstd
+          fi
+
+      - name: Install DotSlash for Windows zstd wrapper
+        if: ${{ matrix.os_family == 'windows' }}
+        uses: facebook/install-dotslash@1e4e7b3e07eaca387acb98f1d4720e0bee8dbb6a # v2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig for musl builds
+        if: ${{ matrix.os_family == 'linux' }}
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+
+      - name: Install musl build tools
+        if: ${{ matrix.os_family == 'linux' }}
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+
+      - name: Configure musl rusty_v8 artifacts
+        if: ${{ matrix.os_family == 'linux' }}
+        uses: ./.github/actions/setup-rusty-v8-musl
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Cargo build
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_args=()
+          for binary in ${{ matrix.cargo_bins }}; do
+            build_args+=(--bin "$binary")
+          done
+          cargo build --target "${{ matrix.target }}" --release "${build_args[@]}"
+
+      - name: Build native package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh" \
+            --target "${{ matrix.target }}" \
+            --bundle primary \
+            --entrypoint-dir "target/${{ matrix.target }}/release" \
+            --archive-dir "dist/${{ matrix.target }}"
+
+      - name: Upload native package artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.target }}
+          path: codex-rs/dist/${{ matrix.target }}/codex-package-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  publish-npm:
+    name: Stage and publish npm packages
+    needs:
+      - validate
+      - build-native-artifacts
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      ROOT_NPM_TAG: ${{ inputs.npm_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      PROVENANCE: ${{ inputs.provenance }}
+      CODEX_RELEASE_ARTIFACT_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Set release version in sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/set_happycodex_release_version.py "${VERSION}"
+
+      - name: Stage HappyCodex npm tarballs from this workflow run
+        shell: bash
+        env:
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ./scripts/stage_npm_packages.py \
+            --release-version "${VERSION}" \
+            --workflow-url "${WORKFLOW_URL}" \
+            --package codex \
+            --output-dir dist/npm
+
+      - name: Verify staged package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          root_tarball="dist/npm/codex-npm-${VERSION}.tgz"
+          platform_tarballs=(
+            "dist/npm/codex-npm-linux-x64-${VERSION}.tgz"
+            "dist/npm/codex-npm-linux-arm64-${VERSION}.tgz"
+            "dist/npm/codex-npm-darwin-x64-${VERSION}.tgz"
+            "dist/npm/codex-npm-darwin-arm64-${VERSION}.tgz"
+            "dist/npm/codex-npm-win32-x64-${VERSION}.tgz"
+            "dist/npm/codex-npm-win32-arm64-${VERSION}.tgz"
+          )
+
+          for tarball in "${platform_tarballs[@]}" "${root_tarball}"; do
+            if [[ ! -f "${tarball}" ]]; then
+              echo "Missing npm tarball: ${tarball}"
+              exit 1
+            fi
+
+            temp_check_dir="$(mktemp -d)"
+            tar -xzf "${tarball}" -C "${temp_check_dir}"
+            package_name="$(node -e "console.log(require(process.argv[1]).name)" "${temp_check_dir}/package/package.json")"
+            rm -rf "${temp_check_dir}"
+            if [[ "${package_name}" != "happycodex" ]]; then
+              echo "Expected ${tarball} to contain package name happycodex, got ${package_name}"
+              exit 1
+            fi
+          done
+
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "${temp_dir}"' EXIT
+          tar -xzf "${root_tarball}" -C "${temp_dir}"
+
+          node - "${temp_dir}/package/package.json" <<'NODE'
+          const fs = require("node:fs");
+          const packageJsonPath = process.argv[2];
+          const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+          if (pkg.name !== "happycodex") {
+            throw new Error(`expected root package name happycodex, got ${pkg.name}`);
+          }
+          if (!pkg.bin || pkg.bin.happycodex !== "bin/codex.js") {
+            throw new Error("expected bin.happycodex to point at bin/codex.js");
+          }
+          const deps = pkg.optionalDependencies || {};
+          const required = [
+            "happycodex-linux-x64",
+            "happycodex-linux-arm64",
+            "happycodex-darwin-x64",
+            "happycodex-darwin-arm64",
+            "happycodex-win32-x64",
+            "happycodex-win32-arm64",
+          ];
+          for (const name of required) {
+            if (!deps[name]) {
+              throw new Error(`missing optional dependency alias ${name}`);
+            }
+            if (!deps[name].startsWith("npm:happycodex@")) {
+              throw new Error(`optional dependency ${name} points at ${deps[name]}`);
+            }
+          }
+          NODE
+
+      - name: Publish to npm
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          root_tarball="dist/npm/codex-npm-${VERSION}.tgz"
+          platform_tarballs=(
+            "dist/npm/codex-npm-linux-x64-${VERSION}.tgz"
+            "dist/npm/codex-npm-linux-arm64-${VERSION}.tgz"
+            "dist/npm/codex-npm-darwin-x64-${VERSION}.tgz"
+            "dist/npm/codex-npm-darwin-arm64-${VERSION}.tgz"
+            "dist/npm/codex-npm-win32-x64-${VERSION}.tgz"
+            "dist/npm/codex-npm-win32-arm64-${VERSION}.tgz"
+          )
+
+          publish_one() {
+            local tarball="$1"
+            local tag="$2"
+            local cmd=(npm publish "${tarball}" --tag "${tag}" --access public)
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              cmd+=(--dry-run)
+            fi
+
+            if [[ "${PROVENANCE}" == "true" && "${DRY_RUN}" != "true" ]]; then
+              cmd+=(--provenance)
+            fi
+
+            echo "+ ${cmd[*]}"
+            "${cmd[@]}"
+          }
+
+          prefix=""
+          if [[ "${ROOT_NPM_TAG}" != "latest" ]]; then
+            prefix="${ROOT_NPM_TAG}-"
+          fi
+
+          for tarball in "${platform_tarballs[@]}"; do
+            filename="$(basename "${tarball}")"
+            platform="${filename#codex-npm-}"
+            platform="${platform%-${VERSION}.tgz}"
+            publish_one "${tarball}" "${prefix}${platform}"
+          done
+
+          publish_one "${root_tarball}" "${ROOT_NPM_TAG}"

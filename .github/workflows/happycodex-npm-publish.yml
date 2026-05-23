@@ -63,13 +63,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)(\.[0-9]+)?)?$ ]]; then
-            echo "version must look like 0.6.0, 0.6.0-alpha.1, or 0.6.0-beta.1"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "version must be SemVer without build metadata, for example 0.6.0, 0.6.0-alpha.1, or 0.6.0-happy.1"
             exit 1
           fi
 
-          if [[ -z "${ROOT_NPM_TAG}" ]]; then
-            echo "npm_tag must not be empty"
+          if [[ -z "${ROOT_NPM_TAG}" || "${ROOT_NPM_TAG}" =~ [[:space:]] ]]; then
+            echo "npm_tag must be a non-empty npm dist-tag without whitespace"
+            exit 1
+          fi
+
+          if [[ "${ROOT_NPM_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "npm_tag must not look like a version"
             exit 1
           fi
 
