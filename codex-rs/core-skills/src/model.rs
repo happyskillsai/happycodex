@@ -13,6 +13,7 @@ pub struct SkillMetadata {
     pub name: String,
     pub description: String,
     pub short_description: Option<String>,
+    pub argument_hint: Option<String>,
     pub interface: Option<SkillInterface>,
     pub dependencies: Option<SkillDependencies>,
     pub policy: Option<SkillPolicy>,

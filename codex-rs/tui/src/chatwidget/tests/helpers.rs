@@ -1397,6 +1397,7 @@ pub(super) fn plugins_test_detail(
                 name: (*name).to_string(),
                 description: format!("{name} description"),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 path: Some(plugins_test_absolute_path(&format!(
                     "skills/{name}/SKILL.md"

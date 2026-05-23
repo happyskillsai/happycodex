@@ -5,8 +5,10 @@
 //! and ensures they stay in sync.
 use std::str::FromStr;
 
+use codex_core_skills::model::SkillMetadata;
 use codex_utils_fuzzy_match::fuzzy_match;
 
+use crate::skills_helpers::skill_description;
 use crate::slash_command::SlashCommand;
 use crate::slash_command::built_in_slash_commands;
 
@@ -18,9 +20,29 @@ pub(crate) struct ServiceTierCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SkillSlashCommand {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) argument_hint: Option<String>,
+    pub(crate) path: std::path::PathBuf,
+}
+
+impl SkillSlashCommand {
+    pub(crate) fn from_skill(skill: &SkillMetadata) -> Self {
+        Self {
+            name: skill.name.clone(),
+            description: skill_description(skill).to_string(),
+            argument_hint: skill.argument_hint.clone(),
+            path: skill.path_to_skills_md.to_path_buf(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SlashCommandItem {
     Builtin(SlashCommand),
     ServiceTier(ServiceTierCommand),
+    Skill(SkillSlashCommand),
 }
 
 impl SlashCommandItem {
@@ -28,6 +50,7 @@ impl SlashCommandItem {
         match self {
             Self::Builtin(cmd) => cmd.command(),
             Self::ServiceTier(command) => &command.name,
+            Self::Skill(command) => &command.name,
         }
     }
 
@@ -35,6 +58,7 @@ impl SlashCommandItem {
         match self {
             Self::Builtin(cmd) => cmd.supports_inline_args(),
             Self::ServiceTier(_) => false,
+            Self::Skill(_) => true,
         }
     }
 
@@ -42,6 +66,7 @@ impl SlashCommandItem {
         match self {
             Self::Builtin(cmd) => cmd.available_in_side_conversation(),
             Self::ServiceTier(_) => false,
+            Self::Skill(_) => false,
         }
     }
 
@@ -49,6 +74,7 @@ impl SlashCommandItem {
         match self {
             Self::Builtin(cmd) => cmd.available_during_task(),
             Self::ServiceTier(_) => false,
+            Self::Skill(_) => false,
         }
     }
 }
@@ -86,6 +112,7 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
 pub(crate) fn commands_for_input(
     flags: BuiltinCommandFlags,
     service_tier_commands: &[ServiceTierCommand],
+    skill_commands: &[SkillSlashCommand],
 ) -> Vec<SlashCommandItem> {
     let mut commands = Vec::new();
     let tiers_enabled = flags.service_tier_commands_enabled;
@@ -100,6 +127,7 @@ pub(crate) fn commands_for_input(
             );
         }
     }
+    commands.extend(skill_commands.iter().cloned().map(SlashCommandItem::Skill));
     commands
         .into_iter()
         .filter(|cmd| !flags.side_conversation_active || cmd.available_in_side_conversation())
@@ -125,13 +153,14 @@ pub(crate) fn find_slash_command(
     name: &str,
     flags: BuiltinCommandFlags,
     service_tier_commands: &[ServiceTierCommand],
+    skill_commands: &[SkillSlashCommand],
 ) -> Option<SlashCommandItem> {
     if let Some(cmd) = find_builtin_command(name, flags) {
         return Some(SlashCommandItem::Builtin(cmd));
     }
 
     let tiers_enabled = flags.service_tier_commands_enabled;
-    tiers_enabled
+    if let Some(command) = tiers_enabled
         .then(|| {
             service_tier_commands
                 .iter()
@@ -140,14 +169,24 @@ pub(crate) fn find_slash_command(
                 .map(SlashCommandItem::ServiceTier)
         })
         .flatten()
+    {
+        return Some(command);
+    }
+
+    skill_commands
+        .iter()
+        .find(|command| command.name == name)
+        .cloned()
+        .map(SlashCommandItem::Skill)
 }
 
 pub(crate) fn has_slash_command_prefix(
     name: &str,
     flags: BuiltinCommandFlags,
     service_tier_commands: &[ServiceTierCommand],
+    skill_commands: &[SkillSlashCommand],
 ) -> bool {
-    commands_for_input(flags, service_tier_commands)
+    commands_for_input(flags, service_tier_commands, skill_commands)
         .into_iter()
         .any(|command| fuzzy_match(command.command(), name).is_some())
 }
@@ -213,7 +252,7 @@ mod tests {
             description: "fastest inference".to_string(),
         }];
 
-        assert_eq!(find_slash_command("fast", flags, &commands), None);
+        assert_eq!(find_slash_command("fast", flags, &commands, &[]), None);
     }
 
     #[test]
@@ -231,7 +270,7 @@ mod tests {
             },
         ];
 
-        let items = commands_for_input(all_enabled_flags(), &commands);
+        let items = commands_for_input(all_enabled_flags(), &commands, &[]);
         let model_idx = items
             .iter()
             .position(|item| matches!(item, SlashCommandItem::Builtin(SlashCommand::Model)))
@@ -247,6 +286,39 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(inserted, expected);
+    }
+
+    #[test]
+    fn skill_commands_are_exposed_and_support_inline_args() {
+        let skill = SkillSlashCommand {
+            name: "commit-helper".to_string(),
+            description: "Create a commit message".to_string(),
+            argument_hint: Some("[scope] [summary]".to_string()),
+            path: "/tmp/commit-helper/SKILL.md".into(),
+        };
+
+        let item = find_slash_command("commit-helper", all_enabled_flags(), &[], from_ref(&skill))
+            .expect("skill command should resolve");
+
+        assert_eq!(item, SlashCommandItem::Skill(skill));
+        assert!(item.supports_inline_args());
+    }
+
+    #[test]
+    fn skill_commands_participate_in_prefix_matching() {
+        let skill = SkillSlashCommand {
+            name: "review-pr".to_string(),
+            description: "Review a pull request".to_string(),
+            argument_hint: Some("[pr-number]".to_string()),
+            path: "/tmp/review-pr/SKILL.md".into(),
+        };
+
+        assert!(has_slash_command_prefix(
+            "rev",
+            all_enabled_flags(),
+            &[],
+            from_ref(&skill)
+        ));
     }
 
     #[test]
@@ -328,7 +400,7 @@ mod tests {
         };
 
         assert_eq!(
-            find_slash_command("fast", flags, from_ref(&command)),
+            find_slash_command("fast", flags, from_ref(&command), &[]),
             Some(SlashCommandItem::ServiceTier(command))
         );
     }

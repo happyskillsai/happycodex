@@ -25,6 +25,7 @@ fn skills_to_info(
                 name: skill.name.clone(),
                 description: skill.description.clone(),
                 short_description: skill.short_description.clone(),
+                argument_hint: skill.argument_hint.clone(),
                 interface: skill.interface.clone().map(|interface| {
                     codex_app_server_protocol::SkillInterface {
                         display_name: interface.display_name,

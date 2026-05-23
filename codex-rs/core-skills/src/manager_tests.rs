@@ -75,6 +75,7 @@ fn test_skill(name: &str, path: PathBuf) -> SkillMetadata {
         name: name.to_string(),
         description: "test".to_string(),
         short_description: None,
+        argument_hint: None,
         interface: None,
         dependencies: None,
         policy: None,

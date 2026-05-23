@@ -3263,6 +3263,9 @@ pub struct SkillMetadata {
     pub short_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub argument_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub interface: Option<SkillInterface>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

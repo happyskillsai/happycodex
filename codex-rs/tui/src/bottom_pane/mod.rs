@@ -2555,6 +2555,7 @@ mod tests {
                 name: "test-skill".to_string(),
                 description: "test skill".to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,

@@ -42,8 +42,19 @@ struct SkillFrontmatter {
     name: Option<String>,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default, rename = "argument-hint")]
+    argument_hint: Option<String>,
+    #[serde(default)]
+    arguments: Option<SkillArgumentsFrontmatter>,
     #[serde(default)]
     metadata: SkillFrontmatterMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SkillArgumentsFrontmatter {
+    String(String),
+    List(Vec<String>),
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -112,6 +123,7 @@ const SKILLS_DIR_NAME: &str = "skills";
 const MAX_NAME_LEN: usize = 64;
 const MAX_DESCRIPTION_LEN: usize = 1024;
 const MAX_SHORT_DESCRIPTION_LEN: usize = MAX_DESCRIPTION_LEN;
+const MAX_ARGUMENT_HINT_LEN: usize = MAX_DESCRIPTION_LEN;
 const MAX_DEFAULT_PROMPT_LEN: usize = MAX_DESCRIPTION_LEN;
 const MAX_DEPENDENCY_TYPE_LEN: usize = MAX_NAME_LEN;
 const MAX_DEPENDENCY_TRANSPORT_LEN: usize = MAX_NAME_LEN;
@@ -643,6 +655,12 @@ async fn parse_skill_file(
         .as_deref()
         .map(sanitize_single_line)
         .filter(|value| !value.is_empty());
+    let argument_hint = parsed
+        .argument_hint
+        .as_deref()
+        .map(sanitize_single_line)
+        .filter(|value| !value.is_empty())
+        .or_else(|| argument_names_hint(parsed.arguments.as_ref()));
     let LoadedSkillMetadata {
         interface,
         dependencies,
@@ -658,6 +676,9 @@ async fn parse_skill_file(
             "metadata.short-description",
         )?;
     }
+    if let Some(argument_hint) = argument_hint.as_deref() {
+        validate_len(argument_hint, MAX_ARGUMENT_HINT_LEN, "argument-hint")?;
+    }
 
     let resolved_path = canonicalize_for_skill_identity(path);
 
@@ -665,6 +686,7 @@ async fn parse_skill_file(
         name,
         description,
         short_description,
+        argument_hint,
         interface,
         dependencies,
         policy,
@@ -672,6 +694,37 @@ async fn parse_skill_file(
         scope,
         plugin_id: plugin_id.map(str::to_string),
     })
+}
+
+fn argument_names_hint(arguments: Option<&SkillArgumentsFrontmatter>) -> Option<String> {
+    let names: Vec<String> = match arguments? {
+        SkillArgumentsFrontmatter::String(value) => value
+            .split_whitespace()
+            .filter_map(valid_argument_name)
+            .map(str::to_string)
+            .collect(),
+        SkillArgumentsFrontmatter::List(values) => values
+            .iter()
+            .filter_map(|value| valid_argument_name(value))
+            .map(str::to_string)
+            .collect(),
+    };
+    (!names.is_empty()).then(|| {
+        names
+            .into_iter()
+            .map(|name| format!("[{name}]"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
+}
+
+fn valid_argument_name(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 fn default_skill_name(path: &AbsolutePathBuf) -> String {

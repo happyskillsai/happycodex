@@ -407,6 +407,9 @@ pub struct SkillMetadata {
     pub short_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub argument_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub interface: Option<SkillInterface>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -648,6 +651,9 @@ pub struct SkillSummary {
     pub name: String,
     pub description: String,
     pub short_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub argument_hint: Option<String>,
     pub interface: Option<SkillInterface>,
     pub path: Option<AbsolutePathBuf>,
     pub enabled: bool,
@@ -762,6 +768,7 @@ impl From<CoreSkillMetadata> for SkillMetadata {
             name: value.name,
             description: value.description,
             short_description: value.short_description,
+            argument_hint: value.argument_hint,
             interface: value.interface.map(SkillInterface::from),
             dependencies: value.dependencies.map(SkillDependencies::from),
             path: value.path,

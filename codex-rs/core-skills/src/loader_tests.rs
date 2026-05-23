@@ -327,6 +327,7 @@ async fn loads_skills_from_home_agents_dir_for_user_scope() -> anyhow::Result<()
             name: "agents-home-skill".to_string(),
             description: "from home agents".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -388,6 +389,75 @@ fn write_skill_interface_at(skill_dir: &Path, contents: &str) -> PathBuf {
 }
 
 #[tokio::test]
+async fn parses_skill_argument_hint_frontmatter() {
+    let codex_home = tempfile::tempdir().expect("tempdir");
+    let skill_path = write_raw_skill_at(
+        &codex_home.path().join("skills"),
+        "commit-helper",
+        r#"
+name: commit-helper
+description: Commit helper
+argument-hint: "[scope] [summary]"
+"#,
+    );
+
+    let outcome = load_skills_from_roots([SkillRoot {
+        path: codex_home.path().join("skills").abs(),
+        scope: SkillScope::User,
+        file_system: Arc::clone(&LOCAL_FS),
+        plugin_id: None,
+        plugin_root: None,
+    }])
+    .await;
+
+    assert!(
+        outcome.errors.is_empty(),
+        "unexpected errors: {:?}",
+        outcome.errors
+    );
+    assert_eq!(outcome.skills[0].path_to_skills_md, normalized(&skill_path));
+    assert_eq!(
+        outcome.skills[0].argument_hint.as_deref(),
+        Some("[scope] [summary]")
+    );
+}
+
+#[tokio::test]
+async fn derives_skill_argument_hint_from_arguments_frontmatter() {
+    let codex_home = tempfile::tempdir().expect("tempdir");
+    write_raw_skill_at(
+        &codex_home.path().join("skills"),
+        "review-pr",
+        r#"
+name: review-pr
+description: Review PR
+arguments:
+  - pr-number
+  - focus
+"#,
+    );
+
+    let outcome = load_skills_from_roots([SkillRoot {
+        path: codex_home.path().join("skills").abs(),
+        scope: SkillScope::User,
+        file_system: Arc::clone(&LOCAL_FS),
+        plugin_id: None,
+        plugin_root: None,
+    }])
+    .await;
+
+    assert!(
+        outcome.errors.is_empty(),
+        "unexpected errors: {:?}",
+        outcome.errors
+    );
+    assert_eq!(
+        outcome.skills[0].argument_hint.as_deref(),
+        Some("[pr-number] [focus]")
+    );
+}
+
+#[tokio::test]
 async fn loads_skill_dependencies_metadata_from_yaml() {
     let codex_home = tempfile::tempdir().expect("tempdir");
     let skill_path = write_skill(&codex_home, "demo", "dep-skill", "from json");
@@ -438,6 +508,7 @@ async fn loads_skill_dependencies_metadata_from_yaml() {
             name: "dep-skill".to_string(),
             description: "from json".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: Some(SkillDependencies {
                 tools: vec![
@@ -514,6 +585,7 @@ interface:
             name: "ui-skill".to_string(),
             description: "from json".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: Some(SkillInterface {
                 display_name: Some("UI Skill".to_string()),
                 short_description: Some("short desc".to_string()),
@@ -668,6 +740,7 @@ async fn accepts_icon_paths_under_assets_dir() {
             name: "ui-skill".to_string(),
             description: "from json".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: Some(SkillInterface {
                 display_name: Some("UI Skill".to_string()),
                 short_description: None,
@@ -716,6 +789,7 @@ async fn ignores_invalid_brand_color() {
             name: "ui-skill".to_string(),
             description: "from json".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -763,6 +837,7 @@ async fn ignores_default_prompt_over_max_length() {
             name: "ui-skill".to_string(),
             description: "from json".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: Some(SkillInterface {
                 display_name: Some("UI Skill".to_string()),
                 short_description: None,
@@ -812,6 +887,7 @@ async fn drops_interface_when_icons_are_invalid() {
             name: "ui-skill".to_string(),
             description: "from json".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -866,6 +942,7 @@ interface:
             name: "send-message".to_string(),
             description: "send messages".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: Some(SkillInterface {
                 display_name: None,
                 short_description: None,
@@ -922,6 +999,7 @@ interface:
             name: "send-message".to_string(),
             description: "send messages".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -967,6 +1045,7 @@ async fn loads_skills_via_symlinked_subdir_for_user_scope() {
             name: "linked-skill".to_string(),
             description: "from link".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1027,6 +1106,7 @@ async fn does_not_loop_on_symlink_cycle_for_user_scope() {
             name: "cycle-skill".to_string(),
             description: "still loads".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1068,6 +1148,7 @@ async fn loads_skills_via_symlinked_subdir_for_admin_scope() {
             name: "admin-linked-skill".to_string(),
             description: "from link".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1108,6 +1189,7 @@ async fn loads_skills_via_symlinked_subdir_for_repo_scope() {
             name: "repo-linked-skill".to_string(),
             description: "from link".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1184,6 +1266,7 @@ async fn respects_max_scan_depth_for_user_scope() {
             name: "within-depth-skill".to_string(),
             description: "loads".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1212,6 +1295,7 @@ async fn loads_valid_skill() {
             name: "demo-skill".to_string(),
             description: "does things carefully".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1245,6 +1329,7 @@ async fn falls_back_to_directory_name_when_skill_name_is_missing() {
             name: "directory-derived".to_string(),
             description: "fallback name".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1291,6 +1376,7 @@ async fn namespaces_plugin_skills_using_plugin_name() {
             name: "sample:sample-search".to_string(),
             description: "search sample data".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1323,6 +1409,7 @@ async fn loads_short_description_from_metadata() {
             name: "demo-skill".to_string(),
             description: "long description".to_string(),
             short_description: Some("short summary".to_string()),
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1436,6 +1523,7 @@ async fn loads_skills_from_repo_root() {
             name: "repo-skill".to_string(),
             description: "from repo".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1472,6 +1560,7 @@ async fn loads_skills_from_agents_dir_without_codex_dir() {
             name: "agents-skill".to_string(),
             description: "from agents".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1526,6 +1615,7 @@ async fn loads_skills_from_all_codex_dirs_under_project_root() {
                 name: "nested-skill".to_string(),
                 description: "from nested".to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,
@@ -1537,6 +1627,7 @@ async fn loads_skills_from_all_codex_dirs_under_project_root() {
                 name: "root-skill".to_string(),
                 description: "from root".to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,
@@ -1577,6 +1668,7 @@ async fn loads_skills_from_codex_dir_when_not_git_repo() {
             name: "local-skill".to_string(),
             description: "from cwd".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1622,6 +1714,7 @@ async fn deduplicates_by_path_preferring_first_root() {
             name: "dupe-skill".to_string(),
             description: "from repo".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1664,6 +1757,7 @@ async fn keeps_duplicate_names_from_repo_and_user() {
                 name: "dupe-skill".to_string(),
                 description: "from repo".to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,
@@ -1675,6 +1769,7 @@ async fn keeps_duplicate_names_from_repo_and_user() {
                 name: "dupe-skill".to_string(),
                 description: "from user".to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,
@@ -1738,6 +1833,7 @@ async fn keeps_duplicate_names_from_nested_codex_dirs() {
                 name: "dupe-skill".to_string(),
                 description: first_description.to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,
@@ -1749,6 +1845,7 @@ async fn keeps_duplicate_names_from_nested_codex_dirs() {
                 name: "dupe-skill".to_string(),
                 description: second_description.to_string(),
                 short_description: None,
+                argument_hint: None,
                 interface: None,
                 dependencies: None,
                 policy: None,
@@ -1821,6 +1918,7 @@ async fn loads_skills_when_cwd_is_file_in_repo() {
             name: "repo-skill".to_string(),
             description: "from repo".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -1880,6 +1978,7 @@ async fn loads_skills_from_system_cache_when_present() {
             name: "system-skill".to_string(),
             description: "from system".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,

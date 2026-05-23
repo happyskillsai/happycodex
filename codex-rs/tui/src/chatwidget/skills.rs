@@ -215,6 +215,7 @@ fn protocol_skill_to_core(skill: &ProtocolSkillMetadata) -> Option<SkillMetadata
         name: skill.name.clone(),
         description: skill.description.clone(),
         short_description: skill.short_description.clone(),
+        argument_hint: skill.argument_hint.clone(),
         interface: skill.interface.clone().map(|interface| SkillInterface {
             display_name: interface.display_name,
             short_description: interface.short_description,

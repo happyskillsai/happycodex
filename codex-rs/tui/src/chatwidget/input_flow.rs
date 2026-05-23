@@ -18,10 +18,7 @@ impl ChatWidget {
                 text_elements,
             } => {
                 let user_message = self.user_message_from_submission(text, text_elements);
-                if user_message.text.is_empty()
-                    && user_message.local_images.is_empty()
-                    && user_message.remote_image_urls.is_empty()
-                {
+                if !user_message.has_content() {
                     return;
                 }
                 let should_submit_now =
@@ -56,6 +53,9 @@ impl ChatWidget {
             }
             InputResult::ServiceTierCommand(command) => {
                 self.handle_service_tier_command_dispatch(command);
+            }
+            InputResult::SkillCommand(command, args, text_elements) => {
+                self.handle_skill_command_dispatch(command, args, text_elements);
             }
             InputResult::CommandWithArgs(cmd, args, text_elements) => {
                 self.handle_slash_command_with_args_dispatch(cmd, args, text_elements);

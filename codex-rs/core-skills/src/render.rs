@@ -917,6 +917,7 @@ mod tests {
             name: name.to_string(),
             description: "desc".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,

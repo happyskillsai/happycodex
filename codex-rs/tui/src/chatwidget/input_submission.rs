@@ -112,10 +112,7 @@ impl ChatWidget {
             self.refresh_pending_input_preview();
             return (true, None);
         }
-        if user_message.text.is_empty()
-            && user_message.local_images.is_empty()
-            && user_message.remote_image_urls.is_empty()
-        {
+        if !user_message.has_content() {
             return (false, None);
         }
         if (!user_message.local_images.is_empty() || !user_message.remote_image_urls.is_empty())

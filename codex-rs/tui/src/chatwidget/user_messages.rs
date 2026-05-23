@@ -37,6 +37,16 @@ pub(crate) struct UserMessage {
     pub(super) mention_bindings: Vec<MentionBinding>,
 }
 
+impl UserMessage {
+    pub(super) fn has_content(&self) -> bool {
+        !self.text.is_empty()
+            || !self.local_images.is_empty()
+            || !self.remote_image_urls.is_empty()
+            || !self.text_elements.is_empty()
+            || !self.mention_bindings.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum UserMessageHistoryRecord {
     UserMessageText,

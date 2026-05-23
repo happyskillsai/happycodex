@@ -16,6 +16,7 @@ fn test_skill_metadata(skill_doc_path: AbsolutePathBuf) -> SkillMetadata {
         name: "test-skill".to_string(),
         description: "test".to_string(),
         short_description: None,
+        argument_hint: None,
         interface: None,
         dependencies: None,
         policy: None,

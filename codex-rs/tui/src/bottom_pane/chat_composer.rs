@@ -196,6 +196,7 @@ use super::skill_popup::MentionItem;
 use super::skill_popup::SkillPopup;
 use super::slash_commands::BuiltinCommandFlags;
 use super::slash_commands::ServiceTierCommand;
+use super::slash_commands::SkillSlashCommand;
 use super::slash_commands::SlashCommandItem;
 use super::slash_commands::find_slash_command;
 use super::slash_commands::has_slash_command_prefix;
@@ -290,6 +291,8 @@ pub enum InputResult {
     Command(SlashCommand),
     /// A bare model service-tier command parsed by the composer.
     ServiceTierCommand(ServiceTierCommand),
+    /// A skill selected through slash-command syntax.
+    SkillCommand(SkillSlashCommand, String, Vec<TextElement>),
     /// An inline slash command and its trimmed argument text.
     ///
     /// The `TextElement` ranges are rebased into the argument string, while any pending local
@@ -1781,6 +1784,9 @@ impl ChatComposer {
                             CommandItem::ServiceTier(command) => {
                                 InputResult::ServiceTierCommand(command)
                             }
+                            CommandItem::Skill(command) => {
+                                InputResult::SkillCommand(command, String::new(), Vec::new())
+                            }
                         },
                         true,
                     );
@@ -2730,6 +2736,7 @@ impl ChatComposer {
                     name,
                     self.builtin_command_flags(),
                     &self.service_tier_commands,
+                    &self.skill_slash_commands(),
                 )
                 .is_some();
                 if !is_known {
@@ -2807,6 +2814,7 @@ impl ChatComposer {
                 | InputResult::Queued { .. }
                 | InputResult::Command(_)
                 | InputResult::ServiceTierCommand(_)
+                | InputResult::SkillCommand(_, _, _)
                 | InputResult::CommandWithArgs(_, _, _)
         ) {
             self.draft.textarea.enter_vim_normal_mode();
@@ -2953,6 +2961,7 @@ impl ChatComposer {
             name,
             self.builtin_command_flags(),
             &self.service_tier_commands,
+            &self.skill_slash_commands(),
         )?;
         if command.supports_inline_args()
             && parse_slash_name(text).is_some_and(|(_, full_rest, _)| !full_rest.is_empty())
@@ -2970,6 +2979,9 @@ impl ChatComposer {
         Some(match command {
             SlashCommandItem::Builtin(cmd) => InputResult::Command(cmd),
             SlashCommandItem::ServiceTier(command) => InputResult::ServiceTierCommand(command),
+            SlashCommandItem::Skill(command) => {
+                InputResult::SkillCommand(command, String::new(), Vec::new())
+            }
         })
     }
 
@@ -2993,6 +3005,7 @@ impl ChatComposer {
             name,
             self.builtin_command_flags(),
             &self.service_tier_commands,
+            &self.skill_slash_commands(),
         )?;
 
         if !command.supports_inline_args() {
@@ -3013,14 +3026,15 @@ impl ChatComposer {
         );
         let trimmed_rest = rest.trim();
         args_elements = Self::trim_text_elements(rest, trimmed_rest, args_elements);
-        let SlashCommandItem::Builtin(cmd) = command else {
-            return None;
-        };
-        Some(InputResult::CommandWithArgs(
-            cmd,
-            trimmed_rest.to_string(),
-            args_elements,
-        ))
+        Some(match command {
+            SlashCommandItem::Builtin(cmd) => {
+                InputResult::CommandWithArgs(cmd, trimmed_rest.to_string(), args_elements)
+            }
+            SlashCommandItem::Skill(command) => {
+                InputResult::SkillCommand(command, trimmed_rest.to_string(), args_elements)
+            }
+            SlashCommandItem::ServiceTier(_) => return None,
+        })
     }
 
     /// Expand pending placeholders and extract normalized inline-command args.
@@ -3782,6 +3796,7 @@ impl ChatComposer {
             name,
             self.builtin_command_flags(),
             &self.service_tier_commands,
+            &self.skill_slash_commands(),
         )
         .is_some()
     }
@@ -3829,7 +3844,15 @@ impl ChatComposer {
             name,
             self.builtin_command_flags(),
             &self.service_tier_commands,
+            &self.skill_slash_commands(),
         )
+    }
+
+    fn skill_slash_commands(&self) -> Vec<SkillSlashCommand> {
+        self.skills
+            .as_ref()
+            .map(|skills| skills.iter().map(SkillSlashCommand::from_skill).collect())
+            .unwrap_or_default()
     }
 
     /// Synchronize `self.command_popup` with the current text in the
@@ -3894,6 +3917,7 @@ impl ChatComposer {
                             side_conversation_active: self.side_conversation_active,
                         },
                         self.service_tier_commands.clone(),
+                        self.skill_slash_commands(),
                     );
                     command_popup.on_composer_text_change(first_line.to_string());
                     self.popups.active = ActivePopup::Command(command_popup);
@@ -6353,6 +6377,7 @@ mod tests {
             name: "codex".to_string(),
             description: "Primary personal Codex repo skill.".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: None,
             dependencies: None,
             policy: None,
@@ -6389,6 +6414,7 @@ mod tests {
             name: "google-calendar:availability".to_string(),
             description: "Find availability and plan event changes".to_string(),
             short_description: None,
+            argument_hint: None,
             interface: Some(SkillInterface {
                 display_name: Some("Google Calendar".to_string()),
                 short_description: None,
@@ -6481,6 +6507,7 @@ mod tests {
                     name: "google-calendar-skill".to_string(),
                     description: "Find availability and plan event changes".to_string(),
                     short_description: None,
+                    argument_hint: None,
                     interface: Some(SkillInterface {
                         display_name: Some("Google Calendar".to_string()),
                         short_description: None,
@@ -7635,6 +7662,9 @@ mod tests {
                 Some(CommandItem::ServiceTier(command)) => {
                     panic!("expected model command, got service tier {command:?}")
                 }
+                Some(CommandItem::Skill(command)) => {
+                    panic!("expected model command, got skill {command:?}")
+                }
                 None => panic!("no selected command for '/mo'"),
             },
             _ => panic!("slash popup not active after typing '/mo'"),
@@ -7691,6 +7721,9 @@ mod tests {
                 Some(CommandItem::ServiceTier(command)) => {
                     panic!("expected resume command, got service tier {command:?}")
                 }
+                Some(CommandItem::Skill(command)) => {
+                    panic!("expected resume command, got skill {command:?}")
+                }
                 None => panic!("no selected command for '/res'"),
             },
             _ => panic!("slash popup not active after typing '/res'"),
@@ -7744,6 +7777,9 @@ mod tests {
                 }
                 Some(CommandItem::ServiceTier(command)) => {
                     panic!("expected pets command, got service tier {command:?}")
+                }
+                Some(CommandItem::Skill(command)) => {
+                    panic!("expected pets command, got skill {command:?}")
                 }
                 None => panic!("no selected command for '/pet'"),
             },
@@ -7799,6 +7835,9 @@ mod tests {
                 Some(CommandItem::ServiceTier(command)) => {
                     panic!("expected btw command, got service tier {command:?}")
                 }
+                Some(CommandItem::Skill(command)) => {
+                    panic!("expected btw command, got skill {command:?}")
+                }
                 None => panic!("no selected command for '/bt'"),
             },
             _ => panic!("slash popup not active after typing '/bt'"),
@@ -7852,6 +7891,9 @@ mod tests {
                 }
                 Some(CommandItem::ServiceTier(command)) => {
                     panic!("expected side command, got service tier {command:?}")
+                }
+                Some(CommandItem::Skill(command)) => {
+                    panic!("expected side command, got skill {command:?}")
                 }
                 None => panic!("no selected command for '/si'"),
             },
@@ -7950,6 +7992,9 @@ mod tests {
             }
             InputResult::ServiceTierCommand(command) => {
                 panic!("expected init command, got service tier {command:?}")
+            }
+            InputResult::SkillCommand(command, _, _) => {
+                panic!("expected init command, got skill {command:?}")
             }
             InputResult::Submitted { text, .. } => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
@@ -8455,6 +8500,9 @@ mod tests {
             InputResult::ServiceTierCommand(command) => {
                 panic!("expected diff command, got service tier {command:?}")
             }
+            InputResult::SkillCommand(command, _, _) => {
+                panic!("expected diff command, got skill {command:?}")
+            }
             InputResult::Submitted { text, .. } => {
                 panic!("expected command dispatch after Tab completion, got literal submit: {text}")
             }
@@ -8651,6 +8699,9 @@ mod tests {
             }
             InputResult::ServiceTierCommand(command) => {
                 panic!("expected mention command, got service tier {command:?}")
+            }
+            InputResult::SkillCommand(command, _, _) => {
+                panic!("expected mention command, got skill {command:?}")
             }
             InputResult::Submitted { text, .. } => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")

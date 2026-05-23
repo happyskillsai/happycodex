@@ -34,6 +34,7 @@ fn plugin_skills_to_info(
             name: skill.name.clone(),
             description: skill.description.clone(),
             short_description: skill.short_description.clone(),
+            argument_hint: skill.argument_hint.clone(),
             interface: skill.interface.clone().map(|interface| {
                 codex_app_server_protocol::SkillInterface {
                     display_name: interface.display_name,
@@ -1966,6 +1967,7 @@ fn remote_plugin_detail_to_info(
                 name: skill.name,
                 description: skill.description,
                 short_description: skill.short_description,
+                argument_hint: None,
                 interface: skill.interface,
                 path: None,
                 enabled: skill.enabled,

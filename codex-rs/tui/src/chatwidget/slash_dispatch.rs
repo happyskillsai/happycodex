@@ -11,6 +11,7 @@ use crate::app_event::ThreadGoalSetMode;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
+use crate::bottom_pane::slash_commands::SkillSlashCommand;
 use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 
@@ -61,6 +62,58 @@ impl ChatWidget {
             return;
         }
         self.toggle_service_tier_from_ui(command);
+        self.bottom_pane.record_pending_slash_command_history();
+    }
+
+    pub(super) fn handle_skill_command_dispatch(
+        &mut self,
+        command: SkillSlashCommand,
+        args: String,
+        text_elements: Vec<TextElement>,
+    ) {
+        if self.active_side_conversation {
+            self.add_error_message(format!(
+                "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
+                command.name
+            ));
+            self.bottom_pane.drain_pending_submission_state();
+            self.bottom_pane.record_pending_slash_command_history();
+            return;
+        }
+        if self.bottom_pane.is_task_running() {
+            self.add_to_history(history_cell::new_error_event(format!(
+                "'/{}' is disabled while a task is in progress.",
+                command.name
+            )));
+            self.request_redraw();
+            self.bottom_pane.record_pending_slash_command_history();
+            return;
+        }
+
+        let (args, text_elements) = if args.trim().is_empty() {
+            (args, text_elements)
+        } else {
+            let Some((prepared_args, prepared_elements)) =
+                self.prepare_live_inline_args(args, text_elements)
+            else {
+                return;
+            };
+            (prepared_args, prepared_elements)
+        };
+        let local_images = self
+            .bottom_pane
+            .take_recent_submission_images_with_placeholders();
+        let remote_image_urls = self.take_remote_image_urls();
+        let mention_bindings = self.bottom_pane.take_recent_submission_mention_bindings();
+        self.submit_skill_command_user_message(
+            command,
+            args,
+            text_elements,
+            local_images,
+            remote_image_urls,
+            mention_bindings,
+        );
+        self.bottom_pane.drain_pending_submission_state();
         self.bottom_pane.record_pending_slash_command_history();
     }
 
@@ -570,6 +623,36 @@ impl ChatWidget {
         }
     }
 
+    fn submit_skill_command_user_message(
+        &mut self,
+        command: SkillSlashCommand,
+        args: String,
+        text_elements: Vec<TextElement>,
+        local_images: Vec<LocalImageAttachment>,
+        remote_image_urls: Vec<String>,
+        mut mention_bindings: Vec<MentionBinding>,
+    ) {
+        mention_bindings.push(MentionBinding {
+            mention: command.name,
+            path: format!("skill://{}", command.path.display()),
+        });
+        let user_message = UserMessage {
+            text: args,
+            local_images,
+            remote_image_urls,
+            text_elements,
+            mention_bindings,
+        };
+        if self.is_session_configured() {
+            self.reasoning_buffer.clear();
+            self.full_reasoning_buffer.clear();
+            self.set_status_header(String::from("Working"));
+            self.submit_user_message(user_message);
+        } else {
+            self.queue_user_message(user_message);
+        }
+    }
+
     fn dispatch_prepared_command_with_args(
         &mut self,
         cmd: SlashCommand,
@@ -829,9 +912,22 @@ impl ChatWidget {
         }
 
         let service_tier_commands = self.current_model_service_tier_commands();
-        let Some(command) =
-            find_slash_command(name, self.builtin_command_flags(), &service_tier_commands)
-        else {
+        let skill_commands = self
+            .bottom_pane
+            .skills()
+            .map(|skills| {
+                skills
+                    .iter()
+                    .map(SkillSlashCommand::from_skill)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let Some(command) = find_slash_command(
+            name,
+            self.builtin_command_flags(),
+            &service_tier_commands,
+            &skill_commands,
+        ) else {
             self.add_info_message(
                 format!(
                     r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
@@ -851,6 +947,17 @@ impl ChatWidget {
                     self.handle_service_tier_command_dispatch(command);
                     QueueDrain::Continue
                 }
+                SlashCommandItem::Skill(command) => {
+                    self.submit_skill_command_user_message(
+                        command,
+                        String::new(),
+                        text_elements,
+                        local_images,
+                        remote_image_urls,
+                        mention_bindings,
+                    );
+                    QueueDrain::Stop
+                }
             };
         }
 
@@ -864,17 +971,6 @@ impl ChatWidget {
             });
             return QueueDrain::Stop;
         }
-        let SlashCommandItem::Builtin(cmd) = command else {
-            self.submit_user_message(UserMessage {
-                text,
-                local_images,
-                remote_image_urls,
-                text_elements,
-                mention_bindings,
-            });
-            return QueueDrain::Stop;
-        };
-
         let trimmed_start = rest.trim_start();
         let leading_trimmed = rest.len().saturating_sub(trimmed_start.len());
         let trimmed_rest = trimmed_start.trim_end();
@@ -883,23 +979,48 @@ impl ChatWidget {
             rest_offset + leading_trimmed,
             &text_elements,
         );
-        if cmd == SlashCommand::Goal
+        if matches!(command, SlashCommandItem::Builtin(SlashCommand::Goal))
             && !self.goal_objective_is_allowed(trimmed_rest, GoalObjectiveValidationSource::Queued)
         {
             return QueueDrain::Continue;
         }
-        self.dispatch_prepared_command_with_args(
-            cmd,
-            PreparedSlashCommandArgs {
-                args: trimmed_rest.to_string(),
-                text_elements: args_elements,
-                local_images,
-                remote_image_urls,
-                mention_bindings,
-                source: SlashCommandDispatchSource::Queued,
-            },
-        );
-        self.queued_command_drain_result(cmd)
+        match command {
+            SlashCommandItem::Builtin(cmd) => {
+                self.dispatch_prepared_command_with_args(
+                    cmd,
+                    PreparedSlashCommandArgs {
+                        args: trimmed_rest.to_string(),
+                        text_elements: args_elements,
+                        local_images,
+                        remote_image_urls,
+                        mention_bindings,
+                        source: SlashCommandDispatchSource::Queued,
+                    },
+                );
+                self.queued_command_drain_result(cmd)
+            }
+            SlashCommandItem::Skill(command) => {
+                self.submit_skill_command_user_message(
+                    command,
+                    trimmed_rest.to_string(),
+                    args_elements,
+                    local_images,
+                    remote_image_urls,
+                    mention_bindings,
+                );
+                QueueDrain::Stop
+            }
+            SlashCommandItem::ServiceTier(_) => {
+                self.submit_user_message(UserMessage {
+                    text,
+                    local_images,
+                    remote_image_urls,
+                    text_elements,
+                    mention_bindings,
+                });
+                QueueDrain::Stop
+            }
+        }
     }
 
     fn builtin_command_flags(&self) -> BuiltinCommandFlags {
