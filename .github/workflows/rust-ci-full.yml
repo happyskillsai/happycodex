@@ -1,9 +1,8 @@
 name: rust-ci-full
 on:
-  push:
-    branches:
-      - main
-      - "**full-ci**"
+  # HappyCodex keeps the upstream full matrix available for explicit audits,
+  # but does not run it on every push. Several legs require OpenAI-specific
+  # self-hosted runners and paid macOS capacity that are not available here.
   workflow_dispatch:
 
 # CI builds in debug (dev) for faster signal.

@@ -4,10 +4,8 @@ name: Bazel
 # https://github.com/cerisier/toolchains_llvm_bootstrapped/blob/main/.github/workflows/ci.yaml
 
 on:
-  pull_request: {}
-  push:
-    branches:
-      - main
+  # HappyCodex keeps upstream Bazel CI as an opt-in diagnostic. Automatic runs
+  # are too expensive/noisy for the fork and rely on upstream cache/secrets.
   workflow_dispatch:
 
 concurrency:

@@ -45,6 +45,7 @@ jobs:
       - name: Stage npm package
         id: stage_npm_package
         env:
+          CODEX_RELEASE_ARTIFACT_REPO: openai/codex
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail

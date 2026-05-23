@@ -94,6 +94,13 @@
 #### 12.4 Publish Order
 #### 12.5 Dry Run
 
+### 13. GitHub Actions Cleanup
+#### 13.1 Why Upstream CI Was Noisy
+#### 13.2 Workflows Made Manual-Only
+#### 13.3 Lightweight CI Kept on Push and Pull Request
+#### 13.4 Npm Staging Artifact Repository Fix
+#### 13.5 Release Workflow Policy
+
 ## 1. Fork Purpose
 
 ### 1.1 Why This Fork Exists
@@ -146,7 +153,7 @@ This fork has not yet added:
 - automated upstream sync workflows,
 - HappyCodex-specific standalone installers,
 - Homebrew cask packaging,
-- full release workflow cleanup for every non-npm artifact.
+- HappyCodex-specific non-npm artifact renaming.
 
 ## 2. Repository Setup
 
@@ -1059,7 +1066,7 @@ Known limitations in the current patch:
 - Remote plugin catalog skills do not expose `argument_hint`; they currently use `None`.
 - The npm package and global command are `happycodex`, but the internal native binary and many non-npm release artifacts are still named `codex`.
 - No upstream sync workflow has been added yet.
-- No publish workflow for `happycodex` has been added yet.
+- The inherited native release workflows still build Codex-shaped native artifacts internally; the npm wrapper exposes those artifacts through `happycodex`.
 
 ### 9.4 Future Work
 
@@ -1068,9 +1075,8 @@ Recommended next steps:
 1. Rename non-npm release artifacts only if the fork needs standalone installers.
 2. Decide whether to rename the Rust native binary from `codex` to `happycodex`.
 3. Add a GitHub Actions upstream sync workflow.
-4. Add a manual publish workflow for npm package publication.
-5. Add a fork changelog section for each downstream patch.
-6. Add integration tests for slash-invoked skills producing `UserInput::Skill`.
+4. Add a fork changelog section for each downstream patch.
+5. Add integration tests for slash-invoked skills producing `UserInput::Skill`.
 
 ## 10. Validation Notes
 
@@ -1413,3 +1419,89 @@ For a real release, rerun the same workflow with:
 ```text
 dry_run: false
 ```
+
+## 13. GitHub Actions Cleanup
+
+### 13.1 Why Upstream CI Was Noisy
+
+OpenAI Codex ships with several heavyweight workflows that are appropriate for the upstream project but not for a small downstream fork. After HappyCodex commits were pushed to `main`, GitHub ran those inherited workflows automatically and sent failure emails.
+
+The failures were expected because several upstream workflows assume OpenAI-owned CI infrastructure:
+
+- self-hosted runner group `codex-runners`,
+- custom runner labels such as `codex-linux-x64`, `codex-linux-arm64`, `codex-windows-x64`, and `codex-windows-arm64`,
+- large macOS runners such as `macos-15-xlarge`,
+- repository secrets such as `BUILDBUDDY_API_KEY`,
+- very large Bazel and V8 build matrices that are expensive and unnecessary for normal fork maintenance.
+
+Those failures did not indicate that the HappySkills feature patch or the HappyCodex npm rename was broken. They indicated that upstream CI was being executed in a fork that does not have upstream's private runner and cache setup.
+
+### 13.2 Workflows Made Manual-Only
+
+The following workflows were changed to `workflow_dispatch` only:
+
+```text
+.github/workflows/sdk.yml
+.github/workflows/rust-ci-full.yml
+.github/workflows/bazel.yml
+.github/workflows/v8-canary.yml
+```
+
+This keeps the workflows available for explicit diagnostics while preventing them from running automatically on every push or pull request.
+
+Technical changes:
+
+- Removed automatic `push` and `pull_request` triggers from `sdk.yml`.
+- Removed automatic `push` triggers from `rust-ci-full.yml`.
+- Removed automatic `push` and `pull_request` triggers from `bazel.yml`.
+- Removed automatic path-filtered `push` and `pull_request` triggers from `v8-canary.yml`.
+- Added comments in each workflow explaining that HappyCodex keeps the inherited workflow as an opt-in diagnostic only.
+
+### 13.3 Lightweight CI Kept on Push and Pull Request
+
+The normal lightweight CI workflow remains automatic:
+
+```text
+.github/workflows/ci.yml
+```
+
+It still runs on:
+
+```yaml
+pull_request: {}
+push: { branches: [main] }
+```
+
+This workflow is the correct default gate for ordinary fork changes because it runs repository consistency checks, the npm package builder unit tests, README checks, and formatting without requiring the full native release matrix.
+
+The lighter supporting workflows that do not depend on OpenAI private runners can also remain automatic, such as codespell, cargo-deny, and pull-request blob-size checks.
+
+### 13.4 Npm Staging Artifact Repository Fix
+
+The lightweight `ci.yml` workflow includes a `Stage npm package` step that intentionally tests the npm staging code against a known upstream OpenAI release workflow run:
+
+```text
+https://github.com/openai/codex/actions/runs/26201494185
+```
+
+After HappyCodex added `CODEX_RELEASE_ARTIFACT_REPO` support to `scripts/stage_npm_packages.py`, the staging script defaults to the current repository in GitHub Actions. That is correct for real HappyCodex releases, but it is wrong for this CI fixture because the fixture workflow URL points at OpenAI's repository.
+
+The CI step now sets:
+
+```yaml
+CODEX_RELEASE_ARTIFACT_REPO: openai/codex
+```
+
+This makes the test explicit: normal CI verifies the staging script with the known OpenAI fixture, while the HappyCodex publish workflow still downloads release artifacts from `happyskillsai/happycodex`.
+
+### 13.5 Release Workflow Policy
+
+HappyCodex should use this workflow policy:
+
+- Pushes and pull requests run lightweight checks only.
+- Heavy inherited upstream workflows are manual-only diagnostics.
+- Native release artifacts are produced only by explicit release workflows or release tags.
+- npm publication is handled only by `.github/workflows/happycodex-npm-publish.yml`.
+- Automatic upstream-sync work should open a sync branch or pull request, not publish directly.
+
+This keeps GitHub Actions cost low, prevents inherited upstream infrastructure failures from spamming email, and preserves the option to run deeper checks when a merge from upstream touches areas like Bazel, V8, SDK packaging, or native release artifacts.

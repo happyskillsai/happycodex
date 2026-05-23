@@ -1,9 +1,11 @@
 name: sdk
 
 on:
-  push:
-    branches: [main]
-  pull_request: {}
+  # HappyCodex keeps this upstream SDK workflow available for manual checks,
+  # but does not run it automatically. The original workflow depends on
+  # OpenAI's private self-hosted runner group (`codex-runners`), so push/PR
+  # triggers fail immediately in the fork.
+  workflow_dispatch:
 
 jobs:
   python-sdk:
