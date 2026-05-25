@@ -52,10 +52,13 @@
   - [10.3 Cargo Build Timeout or Runner Shutdown](#103-cargo-build-timeout-or-runner-shutdown)
   - [10.4 Missing Optional Dependency After Install](#104-missing-optional-dependency-after-install)
   - [10.5 Partial Publish Risk](#105-partial-publish-risk)
+  - [10.6 npm Token or Organization Permission Failure](#106-npm-token-or-organization-permission-failure)
+  - [10.7 Version Already Published](#107-version-already-published)
 - [11. Future Maintenance Rules](#11-future-maintenance-rules)
   - [11.1 Before Merging Upstream](#111-before-merging-upstream)
   - [11.2 Before Releasing](#112-before-releasing)
   - [11.3 When Changing Package Names](#113-when-changing-package-names)
+  - [11.4 When Reusing Native Artifacts](#114-when-reusing-native-artifacts)
 
 ## 1. Purpose
 
@@ -266,6 +269,8 @@ https://github.com/happyskillsai/happycodex/actions/runs/26362610179
 ```
 
 and then published from the corrected scoped package commit.
+
+This works because the native artifacts are platform archives containing the native `codex` payload and resource files. The npm package metadata is generated later by the checkout running `happycodex-npm-publish.yml`. Therefore, a publish-only retry can reuse a previous native build while still applying corrected npm metadata from a newer commit.
 
 ### 3.3 Required Secret
 
@@ -858,6 +863,66 @@ The workflow reduces this risk by:
 
 If a partial publish happens, do not blindly rerun a workflow that republishes already-published versions unless npm accepts idempotent behavior for the exact scenario. Usually the fix is to bump to a new patch or downstream prerelease version.
 
+### 10.6 npm Token or Organization Permission Failure
+
+Symptoms:
+
+```text
+npm error code E401
+npm error code E403
+You do not have permission to publish
+```
+
+Likely causes:
+
+- `NPM_TOKEN` is missing from repository secrets,
+- the token is expired or revoked,
+- the token belongs to an npm account that is not a member of the `happyskillsai` npm organization,
+- the npm account lacks package publish rights for the organization,
+- npm organization policy requires a different token type or additional authentication settings.
+
+Check:
+
+```bash
+gh secret list --repo happyskillsai/happycodex
+npm whoami
+npm org ls happyskillsai
+```
+
+Fix:
+
+- add the npm account that owns the token to the `happyskillsai` npm organization,
+- grant publish rights,
+- create a fresh npm automation/granular token with publish permission,
+- update the GitHub secret:
+
+```bash
+gh secret set NPM_TOKEN --repo happyskillsai/happycodex
+```
+
+### 10.7 Version Already Published
+
+Symptoms:
+
+```text
+cannot publish over the previously published versions
+You cannot publish over the previously published versions
+```
+
+Cause:
+
+npm versions are immutable after publication. This applies to the root version and every platform variant version.
+
+Fix:
+
+Choose a new version. If upstream is still the same `X.Y.Z`, use a downstream prerelease:
+
+```text
+X.Y.Z-happy.1
+```
+
+Do not delete and republish production versions as a normal release strategy. Treat npm publishes as permanent.
+
 ## 11. Future Maintenance Rules
 
 ### 11.1 Before Merging Upstream
@@ -895,3 +960,23 @@ Package identity appears in multiple places:
 - optional dependency target strings.
 
 Do not change only `codex-cli/package.json`. A package-name change must be coordinated across all release and verification paths.
+
+### 11.4 When Reusing Native Artifacts
+
+Use `happycodex-npm-publish.yml` only when the native artifacts are known-good for the exact source version being released.
+
+Safe reuse examples:
+
+- npm package metadata was wrong but native artifacts built correctly,
+- npm token or organization permissions failed after staging passed,
+- publish failed before the root package was published and no native rebuild is needed.
+
+Unsafe reuse examples:
+
+- Rust source changed after the artifact run,
+- upstream was merged after the artifact run,
+- `scripts/codex_package` or native archive layout changed,
+- release version changed,
+- target matrix changed.
+
+When in doubt, run the full `happycodex-release.yml` dry run and rebuild native artifacts.

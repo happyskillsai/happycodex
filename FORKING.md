@@ -12,6 +12,8 @@
 #### 2.2 Local Branches
 #### 2.3 Current Downstream Commit
 #### 2.4 Upstream Sync Strategy
+#### 2.5 Practical Upstream Sync Checklist
+#### 2.6 Release Safety After Upstream Sync
 
 ### 3. Feature Overview
 #### 3.1 User-Facing Behavior
@@ -234,6 +236,121 @@ The intended long-term branch discipline is:
 6. Publish only after the sync PR passes and is merged.
 
 Do not auto-publish directly after an automatic upstream merge. Codex changes can affect protocol types, TUI submission logic, app-server request processors, and release packaging. A sync PR gives the fork a review and CI gate.
+
+### 2.5 Practical Upstream Sync Checklist
+
+Use this checklist whenever OpenAI Codex publishes a new upstream version that HappyCodex should absorb.
+
+Fetch both repositories:
+
+```bash
+git fetch upstream
+git fetch origin
+```
+
+Create a sync branch from the current HappyCodex branch:
+
+```bash
+git switch happycodex/main
+git pull --ff-only origin main
+git switch -c sync/openai-codex-VERSION
+```
+
+Merge the upstream branch or release tag:
+
+```bash
+git merge upstream/main
+```
+
+or, if syncing to an upstream release tag:
+
+```bash
+git merge rust-vVERSION
+```
+
+After resolving conflicts, inspect the HappyCodex-specific surfaces that upstream is most likely to overwrite:
+
+```text
+codex-cli/package.json
+codex-cli/bin/codex.js
+codex-cli/scripts/build_npm_package.py
+scripts/stage_npm_packages.py
+.github/workflows/happycodex-release.yml
+.github/workflows/happycodex-npm-publish.yml
+.github/workflows/ci.yml
+README.md
+FORKING.md
+HAPPYCODEX_NPM_RELEASE.md
+```
+
+Also inspect the skill invocation patch surfaces:
+
+```text
+codex-rs/core-skills/src/model.rs
+codex-rs/core-skills/src/loader.rs
+codex-rs/protocol/src/protocol.rs
+codex-rs/app-server-protocol/src/protocol/v2/plugin.rs
+codex-rs/app-server/src/request_processors/catalog_processor.rs
+codex-rs/app-server/src/request_processors/plugins.rs
+codex-rs/tui/src/bottom_pane/slash_commands.rs
+codex-rs/tui/src/bottom_pane/command_popup.rs
+codex-rs/tui/src/bottom_pane/chat_composer.rs
+codex-rs/tui/src/chatwidget/input_flow.rs
+codex-rs/tui/src/chatwidget/slash_dispatch.rs
+codex-rs/tui/src/chatwidget/user_messages.rs
+codex-rs/tui/src/chatwidget/input_submission.rs
+codex-rs/tui/src/chatwidget/skills.rs
+```
+
+Run text checks that catch the most dangerous accidental reversions:
+
+```bash
+rg -n "@openai/codex|happycodex@latest|CODEX_NPM_NAME|@happyskillsai/happycodex|PLATFORM_PACKAGE_BY_TARGET|NPM_TOKEN|CARGO_PROFILE_RELEASE_LTO|CODEX_RELEASE_ARTIFACT_REPO" \
+  codex-cli scripts .github README.md FORKING.md HAPPYCODEX_NPM_RELEASE.md
+```
+
+Expected invariants after every upstream sync:
+
+- `codex-cli/package.json` package name is `@happyskillsai/happycodex`.
+- `codex-cli/package.json` still exposes `bin.happycodex`.
+- `codex-cli/bin/codex.js` still maps platform aliases to `happycodex-*`.
+- `codex-cli/bin/codex.js` reinstall advice uses `@happyskillsai/happycodex`.
+- `codex-cli/scripts/build_npm_package.py` has `CODEX_NPM_NAME = "@happyskillsai/happycodex"`.
+- root package optional dependencies point to `npm:@happyskillsai/happycodex@...`.
+- release workflows validate package name `@happyskillsai/happycodex`.
+- release workflows keep platform-first publish order.
+- release workflows retain hosted-runner hardening for standard GitHub runners.
+- `scripts/stage_npm_packages.py` still supports `CODEX_RELEASE_ARTIFACT_REPO`.
+- heavy upstream workflows remain manual-only unless intentionally re-enabled.
+
+### 2.6 Release Safety After Upstream Sync
+
+After a sync merge, do not publish immediately.
+
+First run focused local checks:
+
+```bash
+cargo test -p codex-core-skills
+cargo test -p codex-tui
+cargo test -p codex-app-server-protocol
+cargo check --workspace
+PYTHONPYCACHEPREFIX=/private/tmp/happycodex-pycache python3 -m py_compile codex-cli/scripts/build_npm_package.py scripts/stage_npm_packages.py scripts/set_happycodex_release_version.py
+git diff --check
+```
+
+Then run a release dry run through GitHub Actions:
+
+```bash
+gh workflow run happycodex-release.yml \
+  --repo happyskillsai/happycodex \
+  --ref main \
+  -f version=VERSION \
+  -f npm_tag=latest \
+  -f dry_run=true \
+  -f provenance=true
+```
+
+Publish only after the dry run succeeds and npm metadata is checked.
 
 ## 3. Feature Overview
 
@@ -1070,7 +1187,7 @@ Known limitations in the current patch:
 
 - Skill names that collide with built-in slash commands resolve to the built-in command.
 - Remote plugin catalog skills do not expose `argument_hint`; they currently use `None`.
-- The npm package and global command are `happycodex`, but the internal native binary and many non-npm release artifacts are still named `codex`.
+- The npm package is `@happyskillsai/happycodex` and the global command is `happycodex`, but the internal native binary and many non-npm release artifacts are still named `codex`.
 - No upstream sync workflow has been added yet.
 - The inherited native release workflows still build Codex-shaped native artifacts internally; the npm wrapper exposes those artifacts through `happycodex`.
 
@@ -1138,7 +1255,7 @@ The exact package names may need adjustment if upstream renames workspace packag
 
 Change:
 
-- Renamed the npm package from `@openai/codex` to `happycodex`.
+- Renamed the npm package from `@openai/codex` to `@happyskillsai/happycodex`.
 - Changed the global binary map from `codex` to `happycodex`.
 - Updated the package description to describe HappyCodex as a downstream fork with HappySkills enhancements.
 - Updated the repository URL to `git+https://github.com/happyskillsai/happycodex.git`.
@@ -1183,7 +1300,7 @@ bun install -g @happyskillsai/happycodex@latest
 
 Reason:
 
-- The root `happycodex` package installs platform-specific optional dependency aliases.
+- The root `@happyskillsai/happycodex` package installs platform-specific optional dependency aliases.
 - If a platform package is missing, the recovery instruction must point users back to HappyCodex, not upstream Codex.
 
 Important detail:
@@ -1213,7 +1330,7 @@ Reason:
 Important detail:
 
 - The script still uses internal package keys such as `codex`, `codex-linux-x64`, and tarball names such as `codex-npm-darwin-arm64-<version>.tgz`.
-- Those names are internal staging identifiers and release filenames. The package metadata inside the tarballs is now `happycodex`.
+- Those names are internal staging identifiers and release filenames. The package metadata inside the tarballs is now `@happyskillsai/happycodex`.
 - Renaming those internal keys is possible later, but it would touch more release code and is not required for `npm install -g @happyskillsai/happycodex`.
 
 ### 11.4 README.md
@@ -1245,7 +1362,7 @@ Reason:
 
 Change:
 
-- Updated comments in `.github/workflows/rust-release.yml` from `@openai/codex@latest` to `happycodex@latest`.
+- Updated comments in `.github/workflows/rust-release.yml` from `@openai/codex@latest` to `@happyskillsai/happycodex@latest`.
 
 Reason:
 
@@ -1286,7 +1403,7 @@ happycodex-win32-arm64
 `npm pack` produced:
 
 ```text
-happycodex-1.2.3.tgz
+happyskillsai-happycodex-1.2.3.tgz
 ```
 
 The staged launcher was also executed without optional native payloads to verify the missing dependency message. It correctly reported:
@@ -1313,7 +1430,7 @@ This workflow is `workflow_dispatch` only. It does the complete npm release sequ
 4. Stage the root and platform npm tarballs from those artifacts.
 5. Verify the staged package metadata.
 6. Publish platform package versions first.
-7. Publish the root `happycodex` package last.
+7. Publish the root `@happyskillsai/happycodex` package last.
 
 This is now the easiest and safest workflow for ordinary HappyCodex npm releases because the build artifacts and npm package are produced by the same GitHub Actions run.
 
@@ -1325,7 +1442,7 @@ Before running a real publish, configure the GitHub repository secret:
 NPM_TOKEN
 ```
 
-The token must belong to an npm account that can publish the unscoped package name `happycodex`.
+The token must belong to an npm account that can publish under the npm organization scope `@happyskillsai`.
 
 Both npm workflows use `actions/setup-node` against:
 
@@ -1347,8 +1464,8 @@ HappyCodex is a separate npm package from upstream Codex, so it can use the same
 
 Recommended policy:
 
-- If the fork is built from upstream Codex `X.Y.Z` with only the standard HappyCodex patch, publish `happycodex@X.Y.Z`.
-- If the fork needs an extra downstream-only fix before the next upstream version, publish `happycodex@X.Y.Z-happy.1`, then `X.Y.Z-happy.2`, and so on.
+- If the fork is built from upstream Codex `X.Y.Z` with only the standard HappyCodex patch, publish `@happyskillsai/happycodex@X.Y.Z`.
+- If the fork needs an extra downstream-only fix before the next upstream version, publish `@happyskillsai/happycodex@X.Y.Z-happy.1`, then `X.Y.Z-happy.2`, and so on.
 - Use `npm_tag=latest` only for stable versions like `X.Y.Z`.
 - Use a non-latest tag such as `happy`, `alpha`, or `beta` for prerelease versions like `X.Y.Z-happy.1`.
 
@@ -1435,18 +1552,18 @@ Inputs:
 The workflow publishes platform package versions first:
 
 ```text
-happycodex@VERSION-linux-x64
-happycodex@VERSION-linux-arm64
-happycodex@VERSION-darwin-x64
-happycodex@VERSION-darwin-arm64
-happycodex@VERSION-win32-x64
-happycodex@VERSION-win32-arm64
+@happyskillsai/happycodex@VERSION-linux-x64
+@happyskillsai/happycodex@VERSION-linux-arm64
+@happyskillsai/happycodex@VERSION-darwin-x64
+@happyskillsai/happycodex@VERSION-darwin-arm64
+@happyskillsai/happycodex@VERSION-win32-x64
+@happyskillsai/happycodex@VERSION-win32-arm64
 ```
 
 Then it publishes the root wrapper:
 
 ```text
-happycodex@VERSION
+@happyskillsai/happycodex@VERSION
 ```
 
 This order is required. The root wrapper's optional dependencies point at the platform versions. If the root publishes first, users can install a wrapper whose platform payload does not exist yet.
@@ -1469,7 +1586,7 @@ The dry run still:
 
 - builds all six native artifacts,
 - stages all HappyCodex npm tarballs,
-- verifies every tarball has package name `happycodex`,
+- verifies every tarball has package name `@happyskillsai/happycodex`,
 - verifies the root package exposes `bin.happycodex`,
 - verifies root optional dependency aliases point to `npm:@happyskillsai/happycodex@...`,
 - runs `npm publish --dry-run` in the same platform-first order.
@@ -1511,7 +1628,7 @@ dry_run: true
 The dry run still:
 
 - stages all HappyCodex npm tarballs,
-- verifies every tarball has package name `happycodex`,
+- verifies every tarball has package name `@happyskillsai/happycodex`,
 - verifies the root package exposes `bin.happycodex`,
 - verifies root optional dependency aliases point to `npm:@happyskillsai/happycodex@...`,
 - runs `npm publish --dry-run` in the same platform-first order.
