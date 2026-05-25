@@ -104,6 +104,9 @@
 #### 13.4 Npm Staging Artifact Repository Fix
 #### 13.5 Release Workflow Policy
 
+### 14. Release Operations Runbook
+#### 14.1 Production npm Release Lessons
+
 ## 1. Fork Purpose
 
 ### 1.1 Why This Fork Exists
@@ -1604,3 +1607,15 @@ HappyCodex should use this workflow policy:
 - Automatic upstream-sync work should open a sync branch or pull request, not publish directly.
 
 This keeps GitHub Actions cost low, prevents inherited upstream infrastructure failures from spamming email, and preserves the option to run deeper checks when a merge from upstream touches areas like Bazel, V8, SDK packaging, or native release artifacts.
+
+## 14. Release Operations Runbook
+
+### 14.1 Production npm Release Lessons
+
+The detailed production npm release runbook is maintained in:
+
+```text
+HAPPYCODEX_NPM_RELEASE.md
+```
+
+That file documents the final scoped npm package architecture, GitHub Actions release procedure, native build problems, npm publishing failure modes, production run IDs, verification commands, and future maintenance rules.
