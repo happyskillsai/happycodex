@@ -1,4 +1,4 @@
-<p align="center"><code>npm i -g happycodex</code></p>
+<p align="center"><code>npm i -g @happyskillsai/happycodex</code></p>
 <p align="center"><strong>HappyCodex CLI</strong> is a downstream Codex fork with HappySkills enhancements.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
@@ -18,7 +18,7 @@ Install globally with npm:
 
 ```shell
 # Install using npm
-npm install -g happycodex
+npm install -g @happyskillsai/happycodex
 ```
 
 Then simply run `happycodex` to get started.

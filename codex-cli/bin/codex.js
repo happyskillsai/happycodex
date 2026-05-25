@@ -20,6 +20,7 @@ const PLATFORM_PACKAGE_BY_TARGET = {
   "x86_64-pc-windows-msvc": "happycodex-win32-x64",
   "aarch64-pc-windows-msvc": "happycodex-win32-arm64",
 };
+const HAPPYCODEX_NPM_PACKAGE = "@happyskillsai/happycodex";
 
 const { platform, arch } = process;
 
@@ -117,8 +118,8 @@ if (!nativePackage) {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g happycodex@latest"
-      : "npm install -g happycodex@latest";
+      ? `bun install -g ${HAPPYCODEX_NPM_PACKAGE}@latest`
+      : `npm install -g ${HAPPYCODEX_NPM_PACKAGE}@latest`;
   throw new Error(
     `Missing optional dependency ${platformPackage}. Reinstall HappyCodex: ${updateCommand}`,
   );

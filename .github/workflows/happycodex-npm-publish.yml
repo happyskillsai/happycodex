@@ -125,8 +125,8 @@ jobs:
             tar -xzf "${tarball}" -C "${temp_check_dir}"
             package_name="$(node -e "console.log(require(process.argv[1]).name)" "${temp_check_dir}/package/package.json")"
             rm -rf "${temp_check_dir}"
-            if [[ "${package_name}" != "happycodex" ]]; then
-              echo "Expected ${tarball} to contain package name happycodex, got ${package_name}"
+            if [[ "${package_name}" != "@happyskillsai/happycodex" ]]; then
+              echo "Expected ${tarball} to contain package name @happyskillsai/happycodex, got ${package_name}"
               exit 1
             fi
           done
@@ -139,8 +139,8 @@ jobs:
           const fs = require("node:fs");
           const packageJsonPath = process.argv[2];
           const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-          if (pkg.name !== "happycodex") {
-            throw new Error(`expected root package name happycodex, got ${pkg.name}`);
+          if (pkg.name !== "@happyskillsai/happycodex") {
+            throw new Error(`expected root package name @happyskillsai/happycodex, got ${pkg.name}`);
           }
           if (!pkg.bin || pkg.bin.happycodex !== "bin/codex.js") {
             throw new Error(`expected bin.happycodex to point at bin/codex.js`);
@@ -158,7 +158,7 @@ jobs:
             if (!deps[name]) {
               throw new Error(`missing optional dependency alias ${name}`);
             }
-            if (!deps[name].startsWith("npm:happycodex@")) {
+            if (!deps[name].startsWith("npm:@happyskillsai/happycodex@")) {
               throw new Error(`optional dependency ${name} points at ${deps[name]}`);
             }
           }

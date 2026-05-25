@@ -1,5 +1,5 @@
 {
-  "name": "happycodex",
+  "name": "@happyskillsai/happycodex",
   "version": "0.0.0-dev",
   "description": "HappyCodex CLI is a downstream Codex fork with HappySkills enhancements.",
   "license": "Apache-2.0",

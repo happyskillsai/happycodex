@@ -138,7 +138,7 @@ The fork now renames the npm-facing CLI wrapper from upstream Codex to HappyCode
 The global install command is:
 
 ```bash
-npm install -g happycodex
+npm install -g @happyskillsai/happycodex
 ```
 
 The installed command is:
@@ -1142,7 +1142,7 @@ Change:
 
 Reason:
 
-- `npm install -g happycodex` must install a global command named `happycodex`.
+- `npm install -g @happyskillsai/happycodex` must install a global command named `happycodex`.
 - The package should not present itself as the official `@openai/codex` npm package.
 
 Important detail:
@@ -1169,13 +1169,13 @@ Change:
 - Updated missing dependency reinstall messages to use:
 
 ```bash
-npm install -g happycodex@latest
+npm install -g @happyskillsai/happycodex@latest
 ```
 
 and:
 
 ```bash
-bun install -g happycodex@latest
+bun install -g @happyskillsai/happycodex@latest
 ```
 
 Reason:
@@ -1192,7 +1192,7 @@ Important detail:
 
 Change:
 
-- Changed `CODEX_NPM_NAME` from `@openai/codex` to `happycodex`.
+- Changed `CODEX_NPM_NAME` from `@openai/codex` to `@happyskillsai/happycodex`.
 - Changed all `CODEX_PLATFORM_PACKAGES[*].npm_name` aliases to `happycodex-*`.
 - Updated comments and script docstring to describe the HappyCodex npm module.
 
@@ -1203,7 +1203,7 @@ Reason:
 
 ```json
 "optionalDependencies": {
-  "happycodex-darwin-arm64": "npm:happycodex@<version>-darwin-arm64"
+  "happycodex-darwin-arm64": "npm:@happyskillsai/happycodex@<version>-darwin-arm64"
 }
 ```
 
@@ -1211,7 +1211,7 @@ Important detail:
 
 - The script still uses internal package keys such as `codex`, `codex-linux-x64`, and tarball names such as `codex-npm-darwin-arm64-<version>.tgz`.
 - Those names are internal staging identifiers and release filenames. The package metadata inside the tarballs is now `happycodex`.
-- Renaming those internal keys is possible later, but it would touch more release code and is not required for `npm install -g happycodex`.
+- Renaming those internal keys is possible later, but it would touch more release code and is not required for `npm install -g @happyskillsai/happycodex`.
 
 ### 11.4 README.md
 
@@ -1220,7 +1220,7 @@ Change:
 - Updated the install command to:
 
 ```bash
-npm install -g happycodex
+npm install -g @happyskillsai/happycodex
 ```
 
 - Updated the first-run command to:
@@ -1261,7 +1261,7 @@ The generated staged package has:
 
 ```json
 {
-  "name": "happycodex",
+  "name": "@happyskillsai/happycodex",
   "version": "1.2.3",
   "bin": {
     "happycodex": "bin/codex.js"
@@ -1289,7 +1289,7 @@ happycodex-1.2.3.tgz
 The staged launcher was also executed without optional native payloads to verify the missing dependency message. It correctly reported:
 
 ```text
-Missing optional dependency happycodex-darwin-arm64. Reinstall HappyCodex: npm install -g happycodex@latest
+Missing optional dependency happycodex-darwin-arm64. Reinstall HappyCodex: npm install -g @happyskillsai/happycodex@latest
 ```
 
 ## 12. Npm Publish Workflow
@@ -1468,7 +1468,7 @@ The dry run still:
 - stages all HappyCodex npm tarballs,
 - verifies every tarball has package name `happycodex`,
 - verifies the root package exposes `bin.happycodex`,
-- verifies root optional dependency aliases point to `npm:happycodex@...`,
+- verifies root optional dependency aliases point to `npm:@happyskillsai/happycodex@...`,
 - runs `npm publish --dry-run` in the same platform-first order.
 
 For a real release, rerun the same workflow with:
@@ -1510,7 +1510,7 @@ The dry run still:
 - stages all HappyCodex npm tarballs,
 - verifies every tarball has package name `happycodex`,
 - verifies the root package exposes `bin.happycodex`,
-- verifies root optional dependency aliases point to `npm:happycodex@...`,
+- verifies root optional dependency aliases point to `npm:@happyskillsai/happycodex@...`,
 - runs `npm publish --dry-run` in the same platform-first order.
 
 For a real release, rerun the same workflow with:
